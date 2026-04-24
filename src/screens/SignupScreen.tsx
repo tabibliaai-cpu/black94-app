@@ -1,0 +1,156 @@
+import React from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  SafeAreaView,
+  StatusBar,
+} from 'react-native';
+import { colors } from '../theme/colors';
+import { signInWithGoogle } from '../lib/api';
+import { useAppStore } from '../stores/app';
+
+export default function SignupScreen() {
+  const { setUser, setToken } = useAppStore();
+  const [busy, setBusy] = React.useState(false);
+
+  const handleSignUp = async () => {
+    setBusy(true);
+    try {
+      const user = await signInWithGoogle();
+      if (user) {
+        setUser(user);
+        setToken(user.id);
+      }
+    } catch (error) {
+      console.error('Sign up error:', error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <View style={styles.inner}>
+        <Image
+          source={require('../../assets/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+
+        <Text style={styles.title}>Create Account</Text>
+        <Text style={styles.subtitle}>Join Black94 and start connecting today.</Text>
+
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={handleSignUp}
+          disabled={busy}
+          activeOpacity={0.8}
+        >
+          {busy ? (
+            <Text style={styles.buttonText}>Creating account...</Text>
+          ) : (
+            <Text style={styles.buttonText}>Sign up with Google</Text>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.dividerRow}>
+          <View style={styles.divider} />
+          <Text style={styles.dividerText}>or</Text>
+          <View style={styles.divider} />
+        </View>
+
+        <TouchableOpacity
+          onPress={() => {}}
+          style={styles.switchTextContainer}
+        >
+          <Text style={styles.switchText}>
+            Already have an account?{' '}
+            <Text style={styles.switchLink}>Sign In</Text>
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  inner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.white,
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 48,
+  },
+  googleButton: {
+    width: '100%',
+    maxWidth: 320,
+    height: 52,
+    backgroundColor: colors.white,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  buttonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 320,
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginHorizontal: 12,
+  },
+  switchTextContainer: {
+    marginTop: 4,
+  },
+  switchText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  switchLink: {
+    color: colors.white,
+    fontWeight: '600',
+  },
+});

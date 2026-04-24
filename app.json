@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Black94",
+    "slug": "black94",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#07060b"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.black94.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#07060b"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.black94.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "@react-native-google-signin/google-signin"
+    ],
+    "extra": {
+      "firebaseConfig": {
+        "apiKey": "AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck",
+        "authDomain": "black94.firebaseapp.com",
+        "projectId": "black94",
+        "storageBucket": "black94.firebasestorage.app",
+        "messagingSenderId": "210565807767",
+        "appId": "1:210565807767:web:7ba097fc1980fce42373d2",
+        "measurementId": "G-9SRSQ1S4ME"
+      }
+    }
+  }
+}
