@@ -39,7 +39,11 @@
         "messagingSenderId": "210565807767",
         "appId": "1:210565807767:web:7ba097fc1980fce42373d2",
         "measurementId": "G-9SRSQ1S4ME"
+      },
+      "eas": {
+        "projectId": "7d9d5f08-6707-48c0-b8a4-c43abddda2e1"
       }
-    }
+    },
+    "owner": "tabiblia"
   }
 }
