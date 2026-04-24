@@ -10,16 +10,18 @@
         "buildType": "apk"
       }
     },
-    "production": {
+    "preview-signed": {
+      "distribution": "internal",
       "android": {
-        "buildType": "app-bundle",
-        "gradleCommand": ":app:bundleRelease"
+        "buildType": "apk",
+        "signingConfig": "managed"
       }
     },
-    "store": {
+    "production": {
       "distribution": "store",
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "app-bundle",
+        "signingConfig": "managed"
       }
     }
   }
