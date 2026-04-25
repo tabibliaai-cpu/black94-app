@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "210565807767-il5o0rjpmgj0b731oudcud98ho4547bb.apps.googleusercontent.com",
+          "client_id": "210565807767-hm9frd6tmulkbmh43rmdhc22qqgsq3rd.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.black94.app",
-            "certificate_hash": "95c4cc8076e1584d14176272ee3602b9681aa31f"
+            "certificate_hash": "5ed860ad45d87442fd5486ecfdd343c8f31d1467"
           }
         },
         {
@@ -26,7 +26,7 @@
           "client_type": 1,
           "android_info": {
             "package_name": "com.black94.app",
-            "certificate_hash": "5ed860ad45d87442fd5486ecfdd343c8f31d1467"
+            "certificate_hash": "95c4cc8076e1584d14176272ee3602b9681aa31f"
           }
         },
         {
