@@ -8,6 +8,7 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
@@ -94,6 +95,16 @@ export default function LoginScreen() {
             <Text style={styles.switchLink}>Create Account</Text>
           </Text>
         </TouchableOpacity>
+
+        <View style={styles.legalRow}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/privacy-policy')}>
+            <Text style={styles.legalText}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalSeparator}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms')}>
+            <Text style={styles.legalText}>Terms of Service</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -174,5 +185,20 @@ const styles = StyleSheet.create({
   switchLink: {
     color: colors.white,
     fontWeight: '600',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 32,
+    gap: 12,
+  },
+  legalText: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  legalSeparator: {
+    color: colors.textMuted,
+    fontSize: 12,
   },
 });

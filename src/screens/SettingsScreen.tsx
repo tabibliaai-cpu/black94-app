@@ -9,6 +9,7 @@ import {
   SafeAreaView,
   StatusBar,
   TextInput,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -137,6 +138,16 @@ export default function SettingsScreen() {
             <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
         </View>
+
+        <View style={styles.legalRow}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/privacy-policy')}>
+            <Text style={styles.legalText}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalDot}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms')}>
+            <Text style={styles.legalText}>Terms of Service</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -208,4 +219,13 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   logoutText: { color: colors.error, fontSize: 15, fontWeight: '600' },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 12,
+  },
+  legalText: { color: colors.textMuted, fontSize: 12 },
+  legalDot: { color: colors.textMuted, fontSize: 12 },
 });
