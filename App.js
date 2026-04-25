@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar, Text, View, StyleSheet, TouchableOpacity } from 'react-native';
-import { onAuthStateChanged } from './src/lib/api';
+import auth from '@react-native-firebase/auth';
 import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';
 import { fetchUserProfile } from './src/lib/api';
-import { auth } from './src/lib/firebase';
 
 function ErrorFallback({ error, retry }: { error: any; retry: () => void }) {
   return (
@@ -23,7 +22,7 @@ export default function App() {
   const [error, setError] = useState<any>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+    const unsubscribe = auth().onAuthStateChanged(async (fbUser) => {
       try {
         if (fbUser) {
           // Always create a local user from Firebase auth data first
@@ -42,7 +41,7 @@ export default function App() {
             createdAt: Date.now(),
           };
 
-          // Try to get enriched profile from Firestore
+          // Try to get enriched profile from Firestore — never fail the login
           try {
             const profile = await fetchUserProfile(fbUser.uid);
             if (profile) {
