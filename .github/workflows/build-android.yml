@@ -1,44 +1,33 @@
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  Black94 — Android CI/CD Pipeline                                       ║
-# ║  Builds Debug APK + Release AAB on every push to main                   ║
-# ║  Free-tier GitHub Actions · No EAS · No Android Studio                  ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
-
 name: Build Android (APK + AAB)
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:                    # manual trigger from Actions tab
+  workflow_dispatch:
 
 permissions:
-  contents: write                       # needed to create GitHub Releases
+  contents: write
 
 env:
   NODE_VERSION: "20"
   JAVA_VERSION: "17"
-  APP_PACKAGE: com.black94.app
 
 jobs:
-  # ── Build ──────────────────────────────────────────────────────────────
   build-android:
     name: Build APK & AAB
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
 
     steps:
-      # 1 ─ Checkout source
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2 ─ Node.js 20 with npm cache
       - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      # 3 ─ Java JDK 17 (Zulu) with Gradle cache
       - name: Setup Java JDK ${{ env.JAVA_VERSION }} (Zulu)
         uses: actions/setup-java@v4
         with:
@@ -46,35 +35,29 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
 
-      # 4 ─ Install npm dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 5 ─ Generate native Android project from Expo config
       - name: Expo prebuild (generate android/)
         run: npx expo prebuild --platform android --clean
 
-      # 6 ─ Decode the release keystore from GitHub Secret
       - name: Decode release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::KEYSTORE_BASE64 secret is not set — release AAB will be unsigned"
+            echo "::warning::KEYSTORE_BASE64 secret is not set - release AAB will be unsigned"
             exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
           echo "Keystore decoded successfully"
 
-      # 7 ─ Inject release signing config into Gradle
       - name: Configure release signing
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: |
-          # Create a separate signing config file and apply it from build.gradle
-          # This is cleaner than regex-patching build.gradle directly
           cat > android/app/release-signing.gradle << 'GRADLE'
           android.signingConfigs {
               release {
@@ -87,30 +70,20 @@ jobs:
           android.buildTypes.release.signingConfig = android.signingConfigs.release
           GRADLE
 
-          # Append the apply line at the end of build.gradle
           echo "" >> android/app/build.gradle
-          echo "// Release signing (injected by CI/CD pipeline)" >> android/app/build.gradle
           echo "apply from: 'release-signing.gradle'" >> android/app/build.gradle
-
           echo "Signing config injected into build.gradle"
 
-      # 8 ─ Build Debug APK (for staging/testing)
       - name: Build Debug APK
-        run: |
-          cd android
-          ./gradlew assembleDebug --no-daemon --console=plain
+        run: cd android && ./gradlew assembleDebug --no-daemon --console=plain
 
-      # 9 ─ Build Release AAB (for Play Store production)
       - name: Build Release AAB
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-        run: |
-          cd android
-          ./gradlew bundleRelease --no-daemon --console=plain
+        run: cd android && ./gradlew bundleRelease --no-daemon --console=plain
 
-      # 10 ─ Copy outputs to predictable paths
       - name: Collect build artifacts
         run: |
           mkdir -p artifacts
@@ -118,7 +91,6 @@ jobs:
           cp android/app/build/outputs/bundle/release/app-release.aab artifacts/black94-release.aab 2>/dev/null || true
           ls -lh artifacts/
 
-      # 11 ─ Upload to GitHub Actions Artifacts
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -127,7 +99,6 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      # 12 ─ Create GitHub Release with both files
       - name: Create GitHub Release
         id: release
         env:
@@ -138,99 +109,39 @@ jobs:
           TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
           TAG="v${VERSION}-${TIMESTAMP}"
 
-          # Create the release with both APK and AAB
-          RELEASE_NOTES="## Build #${{ github.run_number }}
-
-          **Commit:** \`${SHORT_SHA}\`
-          **Branch:** \`${{ github.ref_name }}\`
-          **Triggered by:** @${{ github.actor }}
-          **Workflow:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
-          ### Artifacts
-          | File | Description |
-          |------|-------------|
-          | \`black94-debug.apk\` | Debug build (sideload for testing) |
-          | \`black94-release.aab\` | Release signed bundle (Play Store) |
-
-          ---
-
-          *This is an automated build from the CI/CD pipeline.*"
-
           gh release create "$TAG" \
             artifacts/black94-debug.apk \
             artifacts/black94-release.aab \
             --title "Build ${{ github.run_number }} (v${VERSION})" \
-            --notes "$RELEASE_NOTES" \
+            --notes "Build #${{ github.run_number }} from ${{ github.ref_name }} ($SHORT_SHA)" \
             --prerelease
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # 13 ─ Send build notification (Slack webhook if configured)
       - name: Notify Slack (optional)
         if: always()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           if [ -z "$SLACK_WEBHOOK_URL" ]; then
-            echo "SLACK_WEBHOOK_URL not set — skipping Slack notification"
-            echo "To enable: add SLACK_WEBHOOK_URL to GitHub Secrets"
+            echo "Slack not configured - skipping notification"
             exit 0
           fi
-
-          STATUS="${{ job.status }}"
-          TAG="${{ steps.release.outputs.tag }}"
-
-          if [ "$STATUS" = "success" ]; then
-            EMOJI="white_check_mark"
-            COLOR="#36a64f"
-          else
-            EMOJI="x"
-            COLOR="#e01e5a"
-          fi
-
           curl -s -X POST "$SLACK_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"attachments\": [{
-                \"color\": \"$COLOR\",
-                \"title\": \":${EMOJI}: Black94 Android Build #${{ github.run_number }} — $STATUS\",
-                \"title_link\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
-                \"fields\": [
-                  { \"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"short\": true },
-                  { \"title\": \"Commit\", \"value\": \"\`${{ github.sha }}\`\", \"short\": true },
-                  { \"title\": \"Release\", \"value\": \"\${TAG}\", \"short\": true }
-                ],
-                \"footer\": \"GitHub Actions CI/CD\"
-              }]
-            }" || true
+            -d "{\"text\":\":$([ ${{ job.status }} = success ] && echo check || echo x): Build #${{ github.run_number }} - ${{ job.status }}\"}" || true
 
-  # ── Notification job (fallback if Slack is not configured) ──────────────
   notify:
     name: Build Status
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-android
     if: always()
     steps:
-      - name: Print build status
+      - name: Print result
         run: |
           if [ "${{ needs.build-android.result }}" = "success" ]; then
-            echo "========================================="
-            echo "  BUILD SUCCEEDED"
-            echo "========================================="
-            echo ""
-            echo "  Download artifacts from:"
-            echo "  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "BUILD SUCCEEDED - artifacts in GitHub Releases"
           else
-            echo "========================================="
-            echo "  BUILD FAILED"
-            echo "========================================="
-            echo ""
-            echo "  Check logs at:"
-            echo "  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo ""
-            echo "  Common fixes:"
-            echo "  1. Ensure all GitHub Secrets are set (see README)"
-            echo "  2. Check that the keystore base64 is valid"
-            echo "  3. Verify Java and Node versions match the workflow"
+            echo "BUILD FAILED - check logs"
             exit 1
           fi
