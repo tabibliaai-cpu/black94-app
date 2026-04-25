@@ -9,7 +9,11 @@ if (typeof globalThis.crypto === 'undefined' && typeof global.crypto !== 'undefi
 // Firebase Auth Web SDK requires IndexedDB for persistence.
 // React Native doesn't have IndexedDB — fake-indexeddb provides an in-memory
 // implementation so Firebase falls back to InMemoryPersistence instead of crashing.
-import 'fake-indexeddb/auto';
+try {
+  require('fake-indexeddb/auto');
+} catch (e) {
+  console.warn('[Polyfill] fake-indexeddb failed to load, Firebase persistence may not work:', e);
+}
 
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';

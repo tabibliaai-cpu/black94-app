@@ -1,6 +1,6 @@
 import React, { useEffect, useState, Component } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
+import { Text, View, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { onAuthStateChanged, auth } from './src/lib/firebase';
 import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';
@@ -9,15 +9,17 @@ import { fetchUserProfile } from './src/lib/api';
 /* ── Error Boundary ───────────────────────────────────────────────────────── */
 
 class AppErrorBoundary extends Component {
-  state = { hasError: false, error: null };
+  state = { hasError: false, error: null, errorStack: '' };
 
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('[App] Uncaught error:', error, errorInfo);
-    this.props.onError(error);
+    const msg = error?.message || String(error) || 'Unknown error';
+    const stack = error?.stack || errorInfo?.componentStack || '';
+    console.error('[App] Uncaught error:', msg, '\n', stack);
+    this.setState({ errorStack: stack });
   }
 
   render() {
@@ -25,19 +27,20 @@ class AppErrorBoundary extends Component {
       return (
         <View style={styles.container}>
           <StatusBar style="light" />
-          <View style={styles.errorContainer}>
+          <ScrollView contentContainerStyle={styles.errorContainer}>
+            <Text style={styles.errorEmoji}>!</Text>
             <Text style={styles.errorTitle}>Something went wrong</Text>
-            <Text style={styles.errorText}>{this.state.error?.message || 'Unknown error'}</Text>
+            <Text style={styles.errorMessage}>{this.state.error?.message || 'Unknown error'}</Text>
+            {this.state.errorStack ? (
+              <Text style={styles.errorStack}>{this.state.errorStack.slice(0, 500)}</Text>
+            ) : null}
             <TouchableOpacity
               style={styles.retryButton}
-              onPress={() => {
-                this.setState({ hasError: false, error: null });
-                this.props.onError(null);
-              }}
+              onPress={() => this.setState({ hasError: false, error: null, errorStack: '' })}
             >
               <Text style={styles.retryText}>Try Again</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       );
     }
@@ -49,12 +52,11 @@ class AppErrorBoundary extends Component {
 
 export default function App() {
   const { user, setUser, setToken, setIsReady, isReady } = useAppStore();
-  const [error, setError] = useState(null);
+  const [initError, setInitError] = useState(null);
 
   useEffect(() => {
     let unsubscribe = undefined;
 
-    // Small delay to ensure all modules are loaded
     const timer = setTimeout(() => {
       try {
         const authInstance = auth();
@@ -113,6 +115,7 @@ export default function App() {
         });
       } catch (initErr) {
         console.error('[App] Firebase initialization error:', initErr);
+        setInitError(initErr?.message || String(initErr));
         setUser(null);
         setToken(null);
         setIsReady(true);
@@ -126,20 +129,13 @@ export default function App() {
   }, []);
 
   return (
-    <AppErrorBoundary
-      onError={(err) => {
-        if (err) {
-          setError(err);
-        } else {
-          setError(null);
-          setIsReady(false);
-        }
-      }}
-    >
+    <AppErrorBoundary>
       <>
         <StatusBar style="light" />
         {!isReady ? (
-          <View style={styles.container} />
+          <View style={styles.container}>
+            <Text style={styles.loadingText}>Loading...</Text>
+          </View>
         ) : (
           <Navigation />
         )}
@@ -153,12 +149,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#07060b',
   },
+  loadingText: {
+    color: '#a3d977',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 100,
+  },
   errorContainer: {
-    flex: 1,
     backgroundColor: '#07060b',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    paddingVertical: 40,
+  },
+  errorEmoji: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#ef4444',
+    marginBottom: 16,
   },
   errorTitle: {
     fontSize: 20,
@@ -166,17 +174,27 @@ const styles = StyleSheet.create({
     color: '#e8f0dc',
     marginBottom: 12,
   },
-  errorText: {
+  errorMessage: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#ef4444',
     textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 22,
+  },
+  errorStack: {
+    fontSize: 11,
+    color: '#64748b',
+    textAlign: 'left',
     marginBottom: 24,
+    lineHeight: 16,
+    fontFamily: 'monospace',
   },
   retryButton: {
     backgroundColor: '#a3d977',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 24,
+    marginTop: 8,
   },
   retryText: {
     color: '#07060b',
