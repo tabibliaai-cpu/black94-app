@@ -97,11 +97,11 @@ export default function LoginScreen() {
         </TouchableOpacity>
 
         <View style={styles.legalRow}>
-          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/privacy-policy')}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/privacy-policy.html')}>
             <Text style={styles.legalText}>Privacy Policy</Text>
           </TouchableOpacity>
           <Text style={styles.legalSeparator}>·</Text>
-          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms')}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms.html')}>
             <Text style={styles.legalText}>Terms of Service</Text>
           </TouchableOpacity>
         </View>

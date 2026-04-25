@@ -140,11 +140,11 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.legalRow}>
-          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/privacy-policy')}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/privacy-policy.html')}>
             <Text style={styles.legalText}>Privacy Policy</Text>
           </TouchableOpacity>
           <Text style={styles.legalDot}>·</Text>
-          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms')}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms.html')}>
             <Text style={styles.legalText}>Terms of Service</Text>
           </TouchableOpacity>
         </View>
