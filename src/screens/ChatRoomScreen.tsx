@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { RouteProp, useRoute } from '@react-navigation/native';
+import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAppStore } from '../stores/app';
 import { fetchMessages, sendMessage, Message } from '../lib/api';
@@ -27,6 +27,7 @@ type RouteParams = {
 
 export default function ChatRoomScreen() {
   const route = useRoute<RouteProp<RouteParams, 'ChatRoom'>>();
+  const navigation = useNavigation();
   const { chatId: routeChatId, userId: targetUserId } = route.params;
   const currentUser = useAppStore((s) => s.user);
   const [messages, setMessages] = React.useState<Message[]>([]);
@@ -114,7 +115,7 @@ export default function ChatRoomScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => {}}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chat</Text>

@@ -11,6 +11,7 @@ import {
   FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAppStore } from '../stores/app';
 import { auth, firestore } from '../lib/firebase';
@@ -25,6 +26,7 @@ interface SearchResult {
 }
 
 export default function SearchScreen() {
+  const navigation = useNavigation<any>();
   const [query, setQuery] = React.useState('');
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [searching, setSearching] = React.useState(false);
@@ -64,7 +66,10 @@ export default function SearchScreen() {
   };
 
   const renderResult = ({ item }: { item: SearchResult }) => (
-    <TouchableOpacity style={styles.resultItem}>
+    <TouchableOpacity
+      style={styles.resultItem}
+      onPress={() => navigation.navigate('ChatRoom', { userId: item.id })}
+    >
       <View style={styles.avatar}>
         {item.profileImage ? (
           <Image source={{ uri: item.profileImage }} style={styles.avatarImg} />
@@ -83,8 +88,11 @@ export default function SearchScreen() {
         <Text style={styles.resultName}>{item.displayName}</Text>
         <Text style={styles.resultUsername}>@{item.username}</Text>
       </View>
-      <TouchableOpacity style={styles.followBtn}>
-        <Text style={styles.followText}>Follow</Text>
+      <TouchableOpacity
+        style={styles.followBtn}
+        onPress={() => navigation.navigate('ChatRoom', { userId: item.id })}
+      >
+        <Text style={styles.followText}>Chat</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );

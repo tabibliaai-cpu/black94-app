@@ -12,6 +12,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { auth, firestore } from '../lib/firebase';
 
+function tsToMillis(ts: any): number {
+  if (!ts) return Date.now();
+  if (typeof ts === 'number') return ts;
+  if (ts?.toMillis) return ts.toMillis();
+  if (ts?.toDate) return ts.toDate().getTime();
+  if (ts?.seconds) return ts.seconds * 1000;
+  return Date.now();
+}
+
 interface Notification {
   id: string;
   type: string;
@@ -50,7 +59,7 @@ export default function NotificationsScreen() {
           actorUsername: data.actorUsername || '',
           message: data.message || '',
           read: data.read || false,
-          time: data.createdAt?.toMillis?.() || Date.now(),
+          time: tsToMillis(data.createdAt),
         };
       });
 
