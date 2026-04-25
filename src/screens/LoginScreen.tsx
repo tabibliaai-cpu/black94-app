@@ -31,10 +31,20 @@ export default function LoginScreen() {
       });
 
       await GoogleSignin.hasPlayServices();
-      const { idToken } = await GoogleSignin.signIn();
+      await GoogleSignin.signIn();
+
+      // Get idToken — try getTokens() as fallback since signIn() may return null idToken
+      // when the server-side code exchange fails silently
+      let idToken = null;
+      try {
+        const tokens = await GoogleSignin.getTokens();
+        idToken = tokens.idToken;
+      } catch (e) {
+        console.warn('[Login] getTokens failed:', e);
+      }
 
       if (!idToken) {
-        Alert.alert('Error', 'Failed to get authentication token');
+        Alert.alert('Error', 'Failed to get authentication token. Please check your Google Play Services.');
         return;
       }
 
