@@ -1,5 +1,4 @@
-import auth, { firebase } from './firebase';
-import firestore from './firebase';
+import { auth, firestore, onAuthStateChanged, signInWithCredential, GoogleAuthProvider, fbSignOut } from './firebase';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -60,9 +59,9 @@ export interface Message {
 
 function tsToMillis(ts: any): number {
   if (!ts) return Date.now();
-  if (typeof ts === 'number') return ts;
-  if (ts?.toDate) return ts.toDate().getTime();
+  if (ts?.toMillis) return ts.toMillis();
   if (ts?.seconds) return ts.seconds * 1000;
+  if (typeof ts === 'number') return ts;
   return Date.now();
 }
 
@@ -74,8 +73,8 @@ function currentUser(): any {
 
 export async function signInWithGoogle(idToken: string): Promise<User | null> {
   try {
-    const credential = firebase.auth.GoogleAuthProvider.credential(idToken);
-    const userCredential = await auth().signInWithCredential(credential);
+    const credential = GoogleAuthProvider.credential(idToken);
+    const userCredential = await signInWithCredential(auth(), credential);
     const fbUser = userCredential.user;
 
     // Create or update user doc in Firestore
@@ -135,7 +134,7 @@ export async function signOut(): Promise<void> {
     await GoogleSignin.revokeAccess();
     await GoogleSignin.signOut();
   } catch {}
-  await auth().signOut();
+  await fbSignOut(auth());
 }
 
 /* ── Posts ────────────────────────────────────────────────────────────────── */

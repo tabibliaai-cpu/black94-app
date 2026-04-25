@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar, Text, View, StyleSheet, TouchableOpacity } from 'react-native';
-import auth from '@react-native-firebase/auth';
+import { onAuthStateChanged, auth } from './src/lib/firebase';
 import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';
 import { fetchUserProfile } from './src/lib/api';
@@ -22,7 +22,7 @@ export default function App() {
   const [error, setError] = useState<any>(null);
 
   useEffect(() => {
-    const unsubscribe = auth().onAuthStateChanged(async (fbUser) => {
+    const unsubscribe = onAuthStateChanged(auth(), async (fbUser) => {
       try {
         if (fbUser) {
           // Always create a local user from Firebase auth data first

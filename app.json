@@ -22,15 +22,13 @@
         "backgroundColor": "#07060b"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.black94.app",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.black94.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "@react-native-google-signin/google-signin",
-      "@react-native-firebase/app"
+      "@react-native-google-signin/google-signin"
     ],
     "extra": {
       "eas": {

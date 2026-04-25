@@ -16,8 +16,7 @@ import { RouteProp, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAppStore } from '../stores/app';
 import { fetchMessages, sendMessage, Message } from '../lib/api';
-import { firestore } from '../lib/firebase';
-import auth from '@react-native-firebase/auth';
+import { firestore, auth } from '../lib/firebase';
 
 type RouteParams = {
   ChatRoom: {
