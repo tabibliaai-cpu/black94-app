@@ -22,7 +22,15 @@
         "backgroundColor": "#07060b"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.black94.app"
+      "package": "com.black94.app",
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 1,
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA"
+      ],
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/favicon.png"

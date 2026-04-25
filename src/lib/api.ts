@@ -59,9 +59,10 @@ export interface Message {
 
 function tsToMillis(ts: any): number {
   if (!ts) return Date.now();
-  if (ts?.toMillis) return ts.toMillis();
-  if (ts?.seconds) return ts.seconds * 1000;
   if (typeof ts === 'number') return ts;
+  if (ts?.toMillis) return ts.toMillis();
+  if (ts?.toDate) return ts.toDate().getTime();
+  if (ts?.seconds) return ts.seconds * 1000;
   return Date.now();
 }
 

@@ -26,7 +26,7 @@ export default function LoginScreen() {
       // Step 1: Get Google Sign-In token
       const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
       GoogleSignin.configure({
-        webClientId: '210565807767-3sr1qs2vl.apps.googleusercontent.com',
+        webClientId: '210565807767-j1k2l3m4n5.apps.googleusercontent.com',
         offlineAccess: true,
       });
 

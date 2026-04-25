@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { StatusBar, Text, View, StyleSheet, TouchableOpacity } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import { onAuthStateChanged, auth } from './src/lib/firebase';
 import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';

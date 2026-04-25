@@ -9,6 +9,7 @@ import {
   RefreshControl,
   SafeAreaView,
   StatusBar,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -188,11 +189,14 @@ export default function FeedScreen() {
       {composing && (
         <View style={styles.composeBar}>
           <View style={styles.composeInput}>
-            <Text
+            <TextInput
               style={styles.composeText}
               placeholder="What's on your mind?"
+              placeholderTextColor={colors.textMuted}
               multiline
-            >{caption}</Text>
+              value={caption}
+              onChangeText={setCaption}
+            />
           </View>
           <TouchableOpacity
             style={[styles.composeBtn, !caption.trim() && { opacity: 0.5 }]}
