@@ -1,4 +1,6 @@
-import { auth, firestore } from './firebase';
+import { auth, db, signInWithCredential, GoogleAuthProvider, fbSignOut } from './firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, limit, where, addDoc, deleteDoc, increment, serverTimestamp, onSnapshot, Timestamp } from 'firebase/firestore';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -55,115 +57,118 @@ export interface Message {
   createdAt: number;
 }
 
+/* ── Helpers ──────────────────────────────────────────────────────────────── */
+
+function tsToMillis(ts: any): number {
+  if (!ts) return Date.now();
+  if (ts instanceof Timestamp) return ts.toMillis();
+  if (ts?.toMillis) return ts.toMillis();
+  if (typeof ts === 'number') return ts;
+  return Date.now();
+}
+
+function currentUser(): any {
+  return auth.currentUser;
+}
+
 /* ── Auth ─────────────────────────────────────────────────────────────────── */
 
-export async function signInWithGoogle(): Promise<User | null> {
-  const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
-
-  GoogleSignin.configure({
-    webClientId: '210565807767-3sr1qs2vl.apps.googleusercontent.com',
-    offlineAccess: true,
-  });
-
+export async function signInWithGoogle(idToken: string): Promise<User | null> {
   try {
-    await GoogleSignin.hasPlayServices();
-    const { idToken } = await GoogleSignin.signIn();
-    const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-    const userCredential = await auth().signInWithCredential(googleCredential);
+    const credential = GoogleAuthProvider.credential(idToken);
+    const userCredential = await signInWithCredential(auth, credential);
     const fbUser = userCredential.user;
 
     // Create or update user doc in Firestore
-    const userDoc = await firestore().collection('users').doc(fbUser.uid).get();
+    const userDocRef = doc(db, 'users', fbUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+    const username = fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid;
+
     const userData: any = {
       uid: fbUser.uid,
       email: fbUser.email,
-      username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
-      usernameLower: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
+      username: username,
+      usernameLower: username.toLowerCase(),
       displayName: fbUser.displayName || 'User',
       profileImage: fbUser.photoURL || null,
       role: 'personal',
       badge: '',
       subscription: 'free',
       isVerified: false,
-      updatedAt: firestore.FieldValue.serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
-    if (!userDoc.exists) {
-      userData.createdAt = firestore.FieldValue.serverTimestamp();
-      await firestore().collection('users').doc(fbUser.uid).set(userData);
-      // Also create username doc
-      await firestore().collection('usernames').doc(userData.usernameLower).set({ uid: fbUser.uid });
+    if (!userDocSnap.exists()) {
+      userData.createdAt = serverTimestamp();
+      await setDoc(userDocRef, userData);
+      await setDoc(doc(db, 'usernames', username.toLowerCase()), { uid: fbUser.uid });
     } else {
-      await firestore().collection('users').doc(fbUser.uid).update({
+      await updateDoc(userDocRef, {
         profileImage: fbUser.photoURL || null,
-        updatedAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
     }
 
     return {
       id: fbUser.uid,
       email: fbUser.email || '',
-      username: userData.username,
+      username: username,
       displayName: userData.displayName,
-      bio: userDoc.exists ? (userDoc.data()?.bio || '') : '',
+      bio: userDocSnap.exists() ? (userDocSnap.data()?.bio || '') : '',
       profileImage: userData.profileImage,
-      coverImage: userDoc.exists ? (userDoc.data()?.coverImage || null) : null,
-      role: userDoc.exists ? (userDoc.data()?.role || 'personal') : 'personal',
-      badge: userDoc.exists ? (userDoc.data()?.badge || '') : '',
-      subscription: userDoc.exists ? (userDoc.data()?.subscription || 'free') : 'free',
-      isVerified: userDoc.exists ? (userDoc.data()?.isVerified || false) : false,
-      createdAt: userDoc.exists ? (userDoc.data()?.createdAt?.toMillis?.() || Date.now()) : Date.now(),
+      coverImage: userDocSnap.exists() ? (userDocSnap.data()?.coverImage || null) : null,
+      role: userDocSnap.exists() ? (userDocSnap.data()?.role || 'personal') : 'personal',
+      badge: userDocSnap.exists() ? (userDocSnap.data()?.badge || '') : '',
+      subscription: userDocSnap.exists() ? (userDocSnap.data()?.subscription || 'free') : 'free',
+      isVerified: userDocSnap.exists() ? (userDocSnap.data()?.isVerified || false) : false,
+      createdAt: userDocSnap.exists() ? tsToMillis(userDocSnap.data()?.createdAt) : Date.now(),
     };
   } catch (error: any) {
-    if (error.code === '12501') {
-      // User cancelled
-      return null;
-    }
+    if (error.code === '12501') return null;
     console.error('[Auth] Google sign-in error:', error);
     throw error;
   }
 }
 
 export async function signOut(): Promise<void> {
-  const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
   try {
+    const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
     await GoogleSignin.revokeAccess();
     await GoogleSignin.signOut();
   } catch {}
-  await auth().signOut();
+  await fbSignOut(auth);
 }
+
+export { auth, db, onAuthStateChanged };
 
 /* ── Posts ────────────────────────────────────────────────────────────────── */
 
-export async function fetchFeed(limit = 20): Promise<Post[]> {
-  const snapshot = await firestore()
-    .collection('posts')
-    .orderBy('createdAt', 'desc')
-    .limit(limit)
-    .get();
+export async function fetchFeed(limitCount = 20): Promise<Post[]> {
+  const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(limitCount));
+  const snapshot = await getDocs(q);
 
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   const posts: Post[] = [];
 
-  for (const doc of snapshot.docs) {
-    const data = doc.data();
+  for (const docSnap of snapshot.docs) {
+    const data = docSnap.data();
     let liked = false;
     let bookmarked = false;
     let reposted = false;
 
     if (userId) {
-      const [likeDoc, bookmarkDoc, repostDoc] = await Promise.all([
-        firestore().collection('post_likes').doc(`${doc.id}_${userId}`).get(),
-        firestore().collection('post_bookmarks').doc(`${doc.id}_${userId}`).get(),
-        firestore().collection('post_reposts').doc(`${doc.id}_${userId}`).get(),
+      const [likeSnap, bookmarkSnap, repostSnap] = await Promise.all([
+        getDoc(doc(db, 'post_likes', `${docSnap.id}_${userId}`)),
+        getDoc(doc(db, 'post_bookmarks', `${docSnap.id}_${userId}`)),
+        getDoc(doc(db, 'post_reposts', `${docSnap.id}_${userId}`)),
       ]);
-      liked = likeDoc.exists;
-      bookmarked = bookmarkDoc.exists;
-      reposted = repostDoc.exists;
+      liked = likeSnap.exists();
+      bookmarked = bookmarkSnap.exists();
+      reposted = repostSnap.exists();
     }
 
     posts.push({
-      id: doc.id,
+      id: docSnap.id,
       authorId: data.authorId || '',
       authorUsername: data.authorUsername || '',
       authorDisplayName: data.authorDisplayName || '',
@@ -178,7 +183,7 @@ export async function fetchFeed(limit = 20): Promise<Post[]> {
       liked,
       bookmarked,
       reposted,
-      createdAt: data.createdAt?.toMillis?.() || Date.now(),
+      createdAt: tsToMillis(data.createdAt),
     });
   }
 
@@ -186,13 +191,13 @@ export async function fetchFeed(limit = 20): Promise<Post[]> {
 }
 
 export async function createPost(caption: string, mediaUrls: string[] = []): Promise<string> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) throw new Error('Not authenticated');
 
-  const userDoc = await firestore().collection('users').doc(userId).get();
-  const userData = userDoc.data();
+  const userDocSnap = await getDoc(doc(db, 'users', userId));
+  const userData = userDocSnap.data();
 
-  const docRef = await firestore().collection('posts').add({
+  const docRef = await addDoc(collection(db, 'posts'), {
     authorId: userId,
     authorUsername: userData?.username || '',
     authorDisplayName: userData?.displayName || '',
@@ -204,42 +209,42 @@ export async function createPost(caption: string, mediaUrls: string[] = []): Pro
     likeCount: 0,
     commentCount: 0,
     repostCount: 0,
-    createdAt: firestore.FieldValue.serverTimestamp(),
-    updatedAt: firestore.FieldValue.serverTimestamp(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 
   return docRef.id;
 }
 
 export async function toggleLike(postId: string, currentlyLiked: boolean): Promise<boolean> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) return false;
 
-  const likeRef = firestore().collection('post_likes').doc(`${postId}_${userId}`);
-  const postRef = firestore().collection('posts').doc(postId);
+  const likeRef = doc(db, 'post_likes', `${postId}_${userId}`);
+  const postRef = doc(db, 'posts', postId);
 
   if (currentlyLiked) {
-    await likeRef.delete();
-    await postRef.update({ likeCount: firestore.FieldValue.increment(-1) });
+    await deleteDoc(likeRef);
+    await updateDoc(postRef, { likeCount: increment(-1) });
     return false;
   } else {
-    await likeRef.set({ postId, userId, createdAt: firestore.FieldValue.serverTimestamp() });
-    await postRef.update({ likeCount: firestore.FieldValue.increment(1) });
+    await setDoc(likeRef, { postId, userId, createdAt: serverTimestamp() });
+    await updateDoc(postRef, { likeCount: increment(1) });
     return true;
   }
 }
 
 export async function toggleBookmark(postId: string, currentlyBookmarked: boolean): Promise<boolean> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) return false;
 
-  const bookmarkRef = firestore().collection('post_bookmarks').doc(`${postId}_${userId}`);
+  const bookmarkRef = doc(db, 'post_bookmarks', `${postId}_${userId}`);
 
   if (currentlyBookmarked) {
-    await bookmarkRef.delete();
+    await deleteDoc(bookmarkRef);
     return false;
   } else {
-    await bookmarkRef.set({ postId, userId, createdAt: firestore.FieldValue.serverTimestamp() });
+    await setDoc(bookmarkRef, { postId, userId, createdAt: serverTimestamp() });
     return true;
   }
 }
@@ -247,35 +252,29 @@ export async function toggleBookmark(postId: string, currentlyBookmarked: boolea
 /* ── Chat ─────────────────────────────────────────────────────────────────── */
 
 export async function fetchChatList(): Promise<Chat[]> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) return [];
 
-  const snapshot = await firestore()
-    .collection('chats')
-    .where('user1Id', '==', userId)
-    .get();
+  const q1 = query(collection(db, 'chats'), where('user1Id', '==', userId));
+  const q2 = query(collection(db, 'chats'), where('user2Id', '==', userId));
 
-  const snapshot2 = await firestore()
-    .collection('chats')
-    .where('user2Id', '==', userId)
-    .get();
-
-  const allDocs = [...snapshot.docs, ...snapshot2.docs];
+  const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+  const allDocs = [...snap1.docs, ...snap2.docs];
   const chats: Chat[] = [];
 
-  for (const doc of allDocs) {
-    const data = doc.data();
+  for (const docSnap of allDocs) {
+    const data = docSnap.data();
     const otherId = data.user1Id === userId ? data.user2Id : data.user1Id;
 
     try {
-      const otherDoc = await firestore().collection('users').doc(otherId).get();
-      const otherData = otherDoc.data();
+      const otherSnap = await getDoc(doc(db, 'users', otherId));
+      const otherData = otherSnap.data();
       chats.push({
-        id: doc.id,
+        id: docSnap.id,
         user1Id: data.user1Id,
         user2Id: data.user2Id,
         lastMessage: data.lastMessage || '',
-        lastMessageTime: data.lastMessageTime?.toMillis?.() || 0,
+        lastMessageTime: tsToMillis(data.lastMessageTime),
         unreadCount: data.unreadCount || 0,
         otherUser: otherData ? {
           id: otherId,
@@ -289,7 +288,7 @@ export async function fetchChatList(): Promise<Chat[]> {
           badge: otherData.badge || '',
           subscription: otherData.subscription || 'free',
           isVerified: otherData.isVerified || false,
-          createdAt: otherData.createdAt?.toMillis?.() || Date.now(),
+          createdAt: tsToMillis(otherData.createdAt),
         } : null,
       });
     } catch {}
@@ -298,59 +297,54 @@ export async function fetchChatList(): Promise<Chat[]> {
   return chats.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 }
 
-export async function fetchMessages(chatId: string, limit = 50): Promise<Message[]> {
-  const snapshot = await firestore()
-    .collection('chats')
-    .doc(chatId)
-    .collection('messages')
-    .orderBy('createdAt', 'asc')
-    .limit(limit)
-    .get();
+export async function fetchMessages(chatId: string, limitCount = 50): Promise<Message[]> {
+  const q = query(
+    collection(db, 'chats', chatId, 'messages'),
+    orderBy('createdAt', 'asc'),
+    limit(limitCount)
+  );
+  const snapshot = await getDocs(q);
 
-  return snapshot.docs.map(doc => {
-    const data = doc.data();
+  return snapshot.docs.map(docSnap => {
+    const data = docSnap.data();
     return {
-      id: doc.id,
+      id: docSnap.id,
       chatId,
       senderId: data.senderId || '',
       receiverId: data.receiverId || '',
       content: data.content || '',
-      createdAt: data.createdAt?.toMillis?.() || Date.now(),
+      createdAt: tsToMillis(data.createdAt),
     };
   });
 }
 
 export async function sendMessage(chatId: string, receiverId: string, content: string): Promise<void> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) return;
 
-  await firestore()
-    .collection('chats')
-    .doc(chatId)
-    .collection('messages')
-    .add({
-      chatId,
-      senderId: userId,
-      receiverId,
-      content,
-      messageType: 'text',
-      status: 'sent',
-      createdAt: firestore.FieldValue.serverTimestamp(),
-    });
+  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+    chatId,
+    senderId: userId,
+    receiverId,
+    content,
+    messageType: 'text',
+    status: 'sent',
+    createdAt: serverTimestamp(),
+  });
 
-  await firestore().collection('chats').doc(chatId).update({
+  await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: content,
-    lastMessageTime: firestore.FieldValue.serverTimestamp(),
-    unreadCount: firestore.FieldValue.increment(1),
+    lastMessageTime: serverTimestamp(),
+    unreadCount: increment(1),
   });
 }
 
 /* ── User ─────────────────────────────────────────────────────────────────── */
 
 export async function fetchUserProfile(userId: string): Promise<User | null> {
-  const doc = await firestore().collection('users').doc(userId).get();
-  if (!doc.exists) return null;
-  const data = doc.data();
+  const docSnap = await getDoc(doc(db, 'users', userId));
+  if (!docSnap.exists()) return null;
+  const data = docSnap.data();
   return {
     id: userId,
     email: data?.email || '',
@@ -363,32 +357,32 @@ export async function fetchUserProfile(userId: string): Promise<User | null> {
     badge: data?.badge || '',
     subscription: data?.subscription || 'free',
     isVerified: data?.isVerified || false,
-    createdAt: data?.createdAt?.toMillis?.() || Date.now(),
+    createdAt: tsToMillis(data?.createdAt),
   };
 }
 
 export async function toggleFollow(targetUserId: string, currentlyFollowing: boolean): Promise<boolean> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) return false;
 
-  const followRef = firestore().collection('follows').doc(`${userId}_${targetUserId}`);
+  const followRef = doc(db, 'follows', `${userId}_${targetUserId}`);
 
   if (currentlyFollowing) {
-    await followRef.delete();
+    await deleteDoc(followRef);
     return false;
   } else {
-    await followRef.set({
+    await setDoc(followRef, {
       followerId: userId,
       followingId: targetUserId,
-      createdAt: firestore.FieldValue.serverTimestamp(),
+      createdAt: serverTimestamp(),
     });
     return true;
   }
 }
 
 export async function checkFollowing(targetUserId: string): Promise<boolean> {
-  const userId = auth().currentUser?.uid;
+  const userId = currentUser()?.uid;
   if (!userId) return false;
-  const doc = await firestore().collection('follows').doc(`${userId}_${targetUserId}`).get();
-  return doc.exists;
+  const docSnap = await getDoc(doc(db, 'follows', `${userId}_${targetUserId}`));
+  return docSnap.exists();
 }

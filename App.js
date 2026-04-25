@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar, Text, View, StyleSheet, TouchableOpacity } from 'react-native';
-import auth from '@react-native-firebase/auth';
+import { onAuthStateChanged } from './src/lib/api';
 import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';
 import { fetchUserProfile } from './src/lib/api';
+import { auth } from './src/lib/firebase';
 
-function ErrorFallback({ error, retry }) {
+function ErrorFallback({ error, retry }: { error: any; retry: () => void }) {
   return (
     <View style={styles.errorContainer}>
       <Text style={styles.errorTitle}>Something went wrong</Text>
@@ -19,72 +20,56 @@ function ErrorFallback({ error, retry }) {
 
 export default function App() {
   const { user, setUser, setToken, setIsReady, isReady } = useAppStore();
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<any>(null);
 
   useEffect(() => {
-    let subscriber;
-
-    async function initAuth() {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       try {
-        subscriber = auth().onAuthStateChanged(async (fbUser) => {
+        if (fbUser) {
+          // Always create a local user from Firebase auth data first
+          const baseUser = {
+            id: fbUser.uid,
+            email: fbUser.email || '',
+            username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
+            displayName: fbUser.displayName || 'User',
+            bio: '',
+            profileImage: fbUser.photoURL || null,
+            coverImage: null,
+            role: 'personal',
+            badge: '',
+            subscription: 'free',
+            isVerified: false,
+            createdAt: Date.now(),
+          };
+
+          // Try to get enriched profile from Firestore
           try {
-            if (fbUser) {
-              // Always create a local user from Firebase auth data
-              // This ensures the user is never kicked to login even if Firestore fails
-              const baseUser = {
-                id: fbUser.uid,
-                email: fbUser.email || '',
-                username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
-                displayName: fbUser.displayName || 'User',
-                bio: '',
-                profileImage: fbUser.photoURL || null,
-                coverImage: null,
-                role: 'personal',
-                badge: '',
-                subscription: 'free',
-                isVerified: false,
-                createdAt: Date.now(),
-              };
-
-              // Try to get enriched profile from Firestore (non-blocking)
-              try {
-                const profile = await fetchUserProfile(fbUser.uid);
-                if (profile) {
-                  setUser(profile);
-                  setToken(profile.id);
-                } else {
-                  setUser(baseUser);
-                  setToken(baseUser.id);
-                }
-              } catch (firestoreErr) {
-                // Firestore failed — still log the user in with basic info
-                console.warn('Firestore profile fetch failed, using basic user:', firestoreErr?.message);
-                setUser(baseUser);
-                setToken(baseUser.id);
-              }
+            const profile = await fetchUserProfile(fbUser.uid);
+            if (profile) {
+              setUser(profile);
+              setToken(profile.id);
             } else {
-              setUser(null);
-              setToken(null);
+              setUser(baseUser);
+              setToken(baseUser.id);
             }
-          } catch (err) {
-            console.error('Error processing auth state:', err);
-            setUser(null);
-            setToken(null);
+          } catch (firestoreErr) {
+            console.warn('Firestore profile fetch failed, using basic user:', firestoreErr?.message);
+            setUser(baseUser);
+            setToken(baseUser.id);
           }
-          setIsReady(true);
-        });
+        } else {
+          setUser(null);
+          setToken(null);
+        }
       } catch (err) {
-        console.error('Firebase auth init error:', err);
-        setError(err);
-        setIsReady(true);
+        console.error('Error processing auth state:', err);
+        setUser(null);
+        setToken(null);
       }
-    }
+      setIsReady(true);
+    });
 
-    initAuth();
-
-    return () => {
-      if (subscriber) subscriber();
-    };
+    return () => unsubscribe();
   }, []);
 
   if (error) {

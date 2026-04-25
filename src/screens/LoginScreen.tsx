@@ -7,6 +7,7 @@ import {
   StyleSheet,
   SafeAreaView,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
@@ -21,13 +22,32 @@ export default function LoginScreen() {
   const handleSignIn = async () => {
     setBusy(true);
     try {
-      const user = await signInWithGoogle();
+      // Step 1: Get Google Sign-In token
+      const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
+      GoogleSignin.configure({
+        webClientId: '210565807767-3sr1qs2vl.apps.googleusercontent.com',
+        offlineAccess: true,
+      });
+
+      await GoogleSignin.hasPlayServices();
+      const { idToken } = await GoogleSignin.signIn();
+
+      if (!idToken) {
+        Alert.alert('Error', 'Failed to get authentication token');
+        return;
+      }
+
+      // Step 2: Sign in with Firebase using the token
+      const user = await signInWithGoogle(idToken);
       if (user) {
         setUser(user);
         setToken(user.id);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Sign in error:', error);
+      if (error.code !== '12501') {
+        Alert.alert('Sign In Failed', error.message || 'Please try again');
+      }
     } finally {
       setBusy(false);
     }

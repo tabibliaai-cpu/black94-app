@@ -14,8 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.black94.app",
-      "googleServicesFile": "./google-services.json"
+      "bundleIdentifier": "com.black94.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -23,22 +22,13 @@
         "backgroundColor": "#07060b"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.black94.app",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.black94.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "@react-native-google-signin/google-signin",
-      [
-        "@react-native-firebase/app",
-        {
-          "android": {
-            "googleServicesFile": "./google-services.json"
-          }
-        }
-      ]
+      "@react-native-google-signin/google-signin"
     ],
     "extra": {
       "eas": {
