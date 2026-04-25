@@ -6,6 +6,10 @@ import 'react-native-get-random-values';
 if (typeof globalThis.crypto === 'undefined' && typeof global.crypto !== 'undefined') {
   globalThis.crypto = global.crypto;
 }
+// Firebase Auth Web SDK requires IndexedDB for persistence.
+// React Native doesn't have IndexedDB — fake-indexeddb provides an in-memory
+// implementation so Firebase falls back to InMemoryPersistence instead of crashing.
+import 'fake-indexeddb/auto';
 
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
