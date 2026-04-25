@@ -99,7 +99,7 @@ export default function SignupScreen() {
             <Text style={styles.legalText}>Privacy Policy</Text>
           </TouchableOpacity>
           <Text style={styles.legalSeparator}>·</Text>
-          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms.html')}>
+          <TouchableOpacity onPress={() => Linking.openURL('https://black94.web.app/terms-of-service.html')}>
             <Text style={styles.legalText}>Terms of Service</Text>
           </TouchableOpacity>
         </View>
