@@ -26,7 +26,7 @@ export default function SignupScreen() {
       const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
       GoogleSignin.configure({
         webClientId: '210565807767-jtedotfd6hqn8cn31meuk2cfp2dkm88o.apps.googleusercontent.com',
-        offlineAccess: true,
+        scopes: ['profile', 'email'],
       });
 
       await GoogleSignin.hasPlayServices();
