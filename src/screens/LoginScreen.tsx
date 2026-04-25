@@ -66,7 +66,7 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity
-          onPress={() => {}}
+          onPress={() => navigation.navigate('Signup' as never)}
           style={styles.switchTextContainer}
         >
           <Text style={styles.switchText}>

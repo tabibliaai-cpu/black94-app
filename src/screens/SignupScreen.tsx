@@ -8,12 +8,14 @@ import {
   SafeAreaView,
   StatusBar,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { signInWithGoogle } from '../lib/api';
 import { useAppStore } from '../stores/app';
 
 export default function SignupScreen() {
   const { setUser, setToken } = useAppStore();
+  const navigation = useNavigation();
   const [busy, setBusy] = React.useState(false);
 
   const handleSignUp = async () => {
@@ -64,7 +66,7 @@ export default function SignupScreen() {
         </View>
 
         <TouchableOpacity
-          onPress={() => {}}
+          onPress={() => navigation.navigate('Login' as never)}
           style={styles.switchTextContainer}
         >
           <Text style={styles.switchText}>

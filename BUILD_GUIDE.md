@@ -22,7 +22,7 @@ eas credentials
 
 ### Step 1: Build a store-ready AAB
 ```bash
-export EXPO_TOKEN="qQ5YqfqN_cTrnAh3f-DjQeCs5Z3_mAe-cYTzCPeQ"
+export EXPO_TOKEN="your_expo_token_here"
 eas build --platform android --profile store
 ```
 

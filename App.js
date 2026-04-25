@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar, Text, View, StyleSheet, TouchableOpacity } from 'react-native';
-import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import auth from '@react-native-firebase/auth';
 import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';
 import { fetchUserProfile } from './src/lib/api';
@@ -29,26 +29,38 @@ export default function App() {
         subscriber = auth().onAuthStateChanged(async (fbUser) => {
           try {
             if (fbUser) {
-              const profile = await fetchUserProfile(fbUser.uid);
-              if (profile) {
-                setUser(profile);
-                setToken(profile.id);
-              } else {
-                setUser({
-                  id: fbUser.uid,
-                  email: fbUser.email || '',
-                  username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
-                  displayName: fbUser.displayName || 'User',
-                  bio: '',
-                  profileImage: fbUser.photoURL || null,
-                  coverImage: null,
-                  role: 'personal',
-                  badge: '',
-                  subscription: 'free',
-                  isVerified: false,
-                  createdAt: Date.now(),
-                });
-                setToken(fbUser.uid);
+              // Always create a local user from Firebase auth data
+              // This ensures the user is never kicked to login even if Firestore fails
+              const baseUser = {
+                id: fbUser.uid,
+                email: fbUser.email || '',
+                username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
+                displayName: fbUser.displayName || 'User',
+                bio: '',
+                profileImage: fbUser.photoURL || null,
+                coverImage: null,
+                role: 'personal',
+                badge: '',
+                subscription: 'free',
+                isVerified: false,
+                createdAt: Date.now(),
+              };
+
+              // Try to get enriched profile from Firestore (non-blocking)
+              try {
+                const profile = await fetchUserProfile(fbUser.uid);
+                if (profile) {
+                  setUser(profile);
+                  setToken(profile.id);
+                } else {
+                  setUser(baseUser);
+                  setToken(baseUser.id);
+                }
+              } catch (firestoreErr) {
+                // Firestore failed — still log the user in with basic info
+                console.warn('Firestore profile fetch failed, using basic user:', firestoreErr?.message);
+                setUser(baseUser);
+                setToken(baseUser.id);
               }
             } else {
               setUser(null);
