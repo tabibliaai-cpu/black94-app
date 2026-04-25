@@ -6,10 +6,7 @@ import {
   getAuth,
   onAuthStateChanged as fbOnAuthStateChanged,
   signOut as fbSignOut,
-  signInWithCustomToken,
   GoogleAuthProvider as FbGoogleAuthProvider,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import {
   getFirestore,

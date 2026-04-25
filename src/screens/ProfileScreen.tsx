@@ -13,17 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAppStore } from '../stores/app';
-import { fetchUserProfile, checkFollowing, toggleFollow, Post } from '../lib/api';
+import { fetchUserProfile, checkFollowing, toggleFollow, Post, tsToMillis } from '../lib/api';
 import { firestore, auth } from '../lib/firebase';
-
-function tsToMillis(ts: any): number {
-  if (!ts) return Date.now();
-  if (typeof ts === 'number') return ts;
-  if (ts?.toMillis) return ts.toMillis();
-  if (ts?.toDate) return ts.toDate().getTime();
-  if (ts?.seconds) return ts.seconds * 1000;
-  return Date.now();
-}
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
