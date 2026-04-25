@@ -1,4 +1,4 @@
-import React, { useEffect, useState, Component, ReactNode } from 'react';
+import React, { useEffect, useState, Component } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import { onAuthStateChanged, auth } from './src/lib/firebase';
@@ -8,24 +8,14 @@ import { fetchUserProfile } from './src/lib/api';
 
 /* ── Error Boundary ───────────────────────────────────────────────────────── */
 
-interface ErrorBoundaryProps {
-  children: ReactNode;
-  onError: (error: Error) => void;
-}
+class AppErrorBoundary extends Component {
+  state = { hasError: false, error: null };
 
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false, error: null };
-
-  static getDerivedStateFromError(error: Error) {
+  static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: any) {
+  componentDidCatch(error, errorInfo) {
     console.error('[App] Uncaught error:', error, errorInfo);
     this.props.onError(error);
   }
@@ -42,7 +32,7 @@ class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
               style={styles.retryButton}
               onPress={() => {
                 this.setState({ hasError: false, error: null });
-                this.props.onError(null as any);
+                this.props.onError(null);
               }}
             >
               <Text style={styles.retryText}>Try Again</Text>
@@ -59,10 +49,10 @@ class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
 
 export default function App() {
   const { user, setUser, setToken, setIsReady, isReady } = useAppStore();
-  const [error, setError] = useState<any>(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
+    let unsubscribe = undefined;
 
     // Small delay to ensure all modules are loaded
     const timer = setTimeout(() => {
