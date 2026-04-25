@@ -3,7 +3,9 @@
 
 import { initializeApp } from 'firebase/app';
 import {
-  getAuth,
+  initializeAuth,
+  inMemoryPersistence,
+  getAuth as fbGetAuth,
   onAuthStateChanged as fbOnAuthStateChanged,
   signOut as fbSignOut,
   GoogleAuthProvider as FbGoogleAuthProvider,
@@ -27,29 +29,31 @@ import {
   increment,
 } from 'firebase/firestore';
 
-/* ── Firebase Init (eager — fail fast with clear error) ───────────────────── */
+/* ── Firebase Config ──────────────────────────────────────────────────── */
+
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck',
+  authDomain: 'black94.firebaseapp.com',
+  projectId: 'black94',
+  storageBucket: 'black94.firebasestorage.app',
+  messagingSenderId: '210565807767',
+  appId: '1:210565807767:web:7ba097fc1980fce42373d2',
+  measurementId: 'G-9SRSQ1S4ME',
+};
+
+/* ── Firebase Init (eager — fail fast with clear error) ───────────────── */
 
 let _app: any = null;
 let _auth: any = null;
 let _db: any = null;
-let _initError: string | null = null;
 
 function ensureFirebaseApp() {
   if (_app) return _app;
   try {
-    _app = initializeApp({
-      apiKey: 'AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck',
-      authDomain: 'black94.firebaseapp.com',
-      projectId: 'black94',
-      storageBucket: 'black94.firebasestorage.app',
-      messagingSenderId: '210565807767',
-      appId: '1:210565807767:web:7ba097fc1980fce42373d2',
-      measurementId: 'G-9SRSQ1S4ME',
-    });
-    console.log('[Firebase] App initialized successfully');
+    _app = initializeApp(FIREBASE_CONFIG);
+    console.log('[Firebase] App initialized');
   } catch (e: any) {
-    _initError = 'Firebase init failed: ' + (e?.message || String(e));
-    console.error('[Firebase]', _initError);
+    console.error('[Firebase] App init failed:', e?.message || e);
   }
   return _app;
 }
@@ -59,11 +63,14 @@ function ensureAuth() {
   const app = ensureFirebaseApp();
   if (app) {
     try {
-      _auth = getAuth(app);
-      console.log('[Firebase] Auth initialized successfully');
+      // Use initializeAuth with inMemoryPersistence explicitly.
+      // This avoids IndexedDB entirely — no fake-indexeddb needed.
+      _auth = initializeAuth(app, {
+        persistence: inMemoryPersistence,
+      });
+      console.log('[Firebase] Auth initialized (in-memory persistence)');
     } catch (e: any) {
-      _initError = 'Auth init failed: ' + (e?.message || String(e));
-      console.error('[Firebase]', _initError);
+      console.error('[Firebase] Auth init failed:', e?.message || e);
     }
   }
   return _auth;
@@ -75,10 +82,9 @@ function ensureDb() {
   if (app) {
     try {
       _db = getFirestore(app);
-      console.log('[Firebase] Firestore initialized successfully');
+      console.log('[Firebase] Firestore initialized');
     } catch (e: any) {
-      _initError = 'Firestore init failed: ' + (e?.message || String(e));
-      console.error('[Firebase]', _initError);
+      console.error('[Firebase] Firestore init failed:', e?.message || e);
     }
   }
   return _db;
@@ -132,7 +138,7 @@ class CompatCollectionRef {
   async get() {
     const db = ensureDb();
     if (!db) {
-      console.error('[Firebase] Firestore not initialized for collection get');
+      console.error('[Firebase] Firestore not initialized');
       return { docs: [], empty: true, size: 0 };
     }
     const ref = collection(db, ...this._path.split('/'));
@@ -177,7 +183,6 @@ class CompatDocRef {
   async get() {
     const db = ensureDb();
     if (!db) {
-      console.error('[Firebase] Firestore not initialized for doc get');
       return { id: this.id, exists: false, data: () => null };
     }
     try {
@@ -195,28 +200,19 @@ class CompatDocRef {
 
   async set(data: any, options?: any) {
     const db = ensureDb();
-    if (!db) {
-      console.error('[Firebase] Firestore not initialized for doc set');
-      return;
-    }
+    if (!db) return;
     await setDoc(doc(db, ...this._path.split('/')), data, options);
   }
 
   async update(data: any) {
     const db = ensureDb();
-    if (!db) {
-      console.error('[Firebase] Firestore not initialized for doc update');
-      return;
-    }
+    if (!db) return;
     await updateDoc(doc(db, ...this._path.split('/')), data);
   }
 
   async delete() {
     const db = ensureDb();
-    if (!db) {
-      console.error('[Firebase] Firestore not initialized for doc delete');
-      return;
-    }
+    if (!db) return;
     await deleteDoc(doc(db, ...this._path.split('/')));
   }
 }
@@ -236,21 +232,17 @@ function firestore() {
 
 /* ── Exports ─────────────────────────────────────────────────────────── */
 
-// Wrap onAuthStateChanged to be safe — auth() might be null if init failed
 function onAuthStateChanged(authInstance: any, callback: (user: any) => void) {
   if (!authInstance) {
-    // Firebase not initialized, treat as signed out
-    console.warn('[Firebase] onAuthStateChanged called with null auth — treating as signed out');
+    console.warn('[Firebase] auth is null — treating as signed out');
     setTimeout(() => callback(null), 0);
     return () => {};
   }
   return fbOnAuthStateChanged(authInstance, callback);
 }
 
-// Re-export signOut
 export { fbSignOut as signOut };
 
-// signInWithGoogleIdToken: converts a Google ID token to a Firebase user
 async function signInWithGoogleIdToken(idToken: string) {
   const authInst = ensureAuth();
   if (!authInst) throw new Error('Firebase Auth not initialized');
@@ -258,7 +250,7 @@ async function signInWithGoogleIdToken(idToken: string) {
   console.log('[Firebase] Signing in with Google ID token...');
   const credential = FbGoogleAuthProvider.credential(idToken);
   const result = await signInWithCredential(authInst, credential);
-  console.log('[Firebase] Sign-in successful, user:', result.user?.uid);
+  console.log('[Firebase] Sign-in successful:', result.user?.uid);
   return result;
 }
 

@@ -16,9 +16,8 @@ class AppErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    const msg = error?.message || String(error) || 'Unknown error';
     const stack = error?.stack || errorInfo?.componentStack || '';
-    console.error('[App] Uncaught error:', msg, '\n', stack);
+    console.error('[App] Uncaught error:', error?.message, '\n', stack);
     this.setState({ errorStack: stack });
   }
 
@@ -28,7 +27,6 @@ class AppErrorBoundary extends Component {
         <View style={styles.container}>
           <StatusBar style="light" />
           <ScrollView contentContainerStyle={styles.errorContainer}>
-            <Text style={styles.errorEmoji}>!</Text>
             <Text style={styles.errorTitle}>Something went wrong</Text>
             <Text style={styles.errorMessage}>{this.state.error?.message || 'Unknown error'}</Text>
             {this.state.errorStack ? (
@@ -50,20 +48,29 @@ class AppErrorBoundary extends Component {
 
 /* ── App Component ────────────────────────────────────────────────────────── */
 
+const FORCE_READY_TIMEOUT = 3000; // Always show UI within 3 seconds
+
 export default function App() {
   const { user, setUser, setToken, setIsReady, isReady } = useAppStore();
-  const [initError, setInitError] = useState(null);
 
   useEffect(() => {
     let unsubscribe = undefined;
+    let forceReady = false;
 
-    const timer = setTimeout(() => {
+    // Safety timeout: ensure the app shows SOMETHING even if Firebase hangs
+    const safetyTimer = setTimeout(() => {
+      console.warn('[App] Safety timeout reached — forcing ready');
+      forceReady = true;
+      setIsReady(true);
+    }, FORCE_READY_TIMEOUT);
+
+    // Initialize Firebase auth
+    const initTimer = setTimeout(() => {
       try {
         const authInstance = auth();
 
         if (!authInstance) {
-          // Firebase auth not available — treat as signed out
-          console.warn('[App] Firebase Auth not initialized, showing login');
+          console.warn('[App] Firebase Auth null — showing login screen');
           setUser(null);
           setToken(null);
           setIsReady(true);
@@ -71,6 +78,8 @@ export default function App() {
         }
 
         unsubscribe = onAuthStateChanged(authInstance, async (fbUser) => {
+          if (forceReady) return; // Already past safety timeout
+
           try {
             if (fbUser) {
               const baseUser = {
@@ -98,7 +107,7 @@ export default function App() {
                   setToken(baseUser.id);
                 }
               } catch (firestoreErr) {
-                console.warn('[App] Firestore profile fetch failed, using basic user');
+                console.warn('[App] Profile fetch failed:', firestoreErr);
                 setUser(baseUser);
                 setToken(baseUser.id);
               }
@@ -107,15 +116,14 @@ export default function App() {
               setToken(null);
             }
           } catch (err) {
-            console.error('[App] Error processing auth state:', err);
+            console.error('[App] Auth state error:', err);
             setUser(null);
             setToken(null);
           }
           setIsReady(true);
         });
       } catch (initErr) {
-        console.error('[App] Firebase initialization error:', initErr);
-        setInitError(initErr?.message || String(initErr));
+        console.error('[App] Firebase init error:', initErr);
         setUser(null);
         setToken(null);
         setIsReady(true);
@@ -123,7 +131,8 @@ export default function App() {
     }, 100);
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(safetyTimer);
+      clearTimeout(initTimer);
       if (unsubscribe) unsubscribe();
     };
   }, []);
@@ -162,12 +171,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 40,
   },
-  errorEmoji: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#ef4444',
-    marginBottom: 16,
-  },
   errorTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -187,7 +190,6 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     marginBottom: 24,
     lineHeight: 16,
-    fontFamily: 'monospace',
   },
   retryButton: {
     backgroundColor: '#a3d977',
