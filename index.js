@@ -1,6 +1,4 @@
-/* ── Polyfills ─────────────────────────────────────────────────────────── */
-// Firebase Web SDK requires crypto.getRandomValues which is missing in React Native.
-import 'react-native-get-random-values';
+/* ── No polyfills needed — Firebase uses REST API (pure fetch) ──────────── */
 
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';

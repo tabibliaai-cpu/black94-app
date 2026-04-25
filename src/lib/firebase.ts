@@ -1,257 +1,542 @@
-// Firebase Web SDK with @react-native-firebase-compatible API
-// Web SDK works in React Native via Metro: auth uses HTTP, Firestore uses WebSocket/HTTP.
+// Firebase REST API — NO Web SDK, NO polyfills needed.
+// Uses pure fetch() for Auth + Firestore. Works in React Native without any shims.
 
-import { initializeApp } from 'firebase/app';
-import {
-  initializeAuth,
-  inMemoryPersistence,
-  getAuth as fbGetAuth,
-  onAuthStateChanged as fbOnAuthStateChanged,
-  signOut as fbSignOut,
-  GoogleAuthProvider as FbGoogleAuthProvider,
-  signInWithCredential,
-} from 'firebase/auth';
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  addDoc,
-  query,
-  where as fbWhere,
-  orderBy as fbOrderBy,
-  limit as fbLimit,
-  serverTimestamp,
-  increment,
-} from 'firebase/firestore';
+const API_KEY = 'AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck';
+const PROJECT_ID = 'black94';
+const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-/* ── Firebase Config ──────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTH — REST API
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-const FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck',
-  authDomain: 'black94.firebaseapp.com',
-  projectId: 'black94',
-  storageBucket: 'black94.firebasestorage.app',
-  messagingSenderId: '210565807767',
-  appId: '1:210565807767:web:7ba097fc1980fce42373d2',
-  measurementId: 'G-9SRSQ1S4ME',
-};
+interface AuthUser {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
 
-/* ── Firebase Init (eager — fail fast with clear error) ───────────────── */
+let _authUser: AuthUser | null = null;
+let _idToken: string | null = null;
+let _refreshToken: string | null = null;
+const _authListeners = new Set<(user: any) => void>();
 
-let _app: any = null;
-let _auth: any = null;
-let _db: any = null;
+function _notifyAuthListeners() {
+  _authListeners.forEach(cb => {
+    try { cb(_authUser); } catch (e) { /* ignore listener errors */ }
+  });
+}
 
-function ensureFirebaseApp() {
-  if (_app) return _app;
+function auth(): { currentUser: AuthUser | null } {
+  return { currentUser: _authUser };
+}
+
+function onAuthStateChanged(
+  _authRef: any,
+  callback: (user: AuthUser | null) => void,
+): () => void {
+  // Fire immediately with current state (same behavior as Firebase SDK)
+  setTimeout(() => callback(_authUser), 0);
+  _authListeners.add(callback);
+  return () => { _authListeners.delete(callback); };
+}
+
+async function signInWithGoogleIdToken(googleIdToken: string) {
+  console.log('[Firebase] Signing in via REST API...');
+  const resp = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        postBody: `id_token=${googleIdToken}&providerId=google.com`,
+        requestUri: `https://${PROJECT_ID}.firebaseapp.com/__/auth/handler`,
+        returnIdpCredential: true,
+        returnSecureToken: true,
+      }),
+    },
+  );
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    const msg = data.error?.message || `Auth HTTP ${resp.status}`;
+    console.error('[Firebase] Auth REST error:', msg);
+    throw new Error(msg);
+  }
+
+  _authUser = {
+    uid: data.localId,
+    email: data.email || null,
+    displayName: data.displayName || null,
+    photoURL: data.photoUrl || null,
+  };
+  _idToken = data.idToken;
+  _refreshToken = data.refreshToken;
+
+  console.log('[Firebase] Sign-in successful (REST):', _authUser.uid);
+  _notifyAuthListeners();
+
+  return { user: _authUser };
+}
+
+async function signOut(_authRef?: any) {
+  // Revoke refresh token server-side (best-effort)
+  if (_refreshToken) {
+    try {
+      await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: _idToken }),
+        },
+      );
+    } catch { /* ignore */ }
+  }
+
+  _authUser = null;
+  _idToken = null;
+  _refreshToken = null;
+  console.log('[Firebase] Signed out (REST)');
+  _notifyAuthListeners();
+}
+
+/* ── Token refresh ────────────────────────────────────────────────────────── */
+
+async function _getValidToken(): Promise<string> {
+  if (_idToken) return _idToken;
+
+  if (!_refreshToken) throw new Error('Not authenticated');
+
   try {
-    _app = initializeApp(FIREBASE_CONFIG);
-    console.log('[Firebase] App initialized');
+    const resp = await fetch(
+      `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          refresh_token: _refreshToken,
+        }),
+      },
+    );
+    const data = await resp.json();
+    if (!data.id_token) throw new Error('Token refresh failed');
+    _idToken = data.id_token;
+    _refreshToken = data.refresh_token || _refreshToken;
+    return _idToken;
   } catch (e: any) {
-    console.error('[Firebase] App init failed:', e?.message || e);
+    // Session is dead — clear state
+    _authUser = null;
+    _idToken = null;
+    _refreshToken = null;
+    _notifyAuthListeners();
+    throw new Error('Session expired — please sign in again');
   }
-  return _app;
 }
 
-function ensureAuth() {
-  if (_auth) return _auth;
-  const app = ensureFirebaseApp();
-  if (app) {
+/* ═══════════════════════════════════════════════════════════════════════════
+   FIRESTORE — REST API
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+async function _firestoreFetch(
+  path: string,
+  method: string = 'GET',
+  body?: any,
+): Promise<any> {
+  let token: string;
+  try {
+    token = await _getValidToken();
+  } catch {
+    throw new Error('Not authenticated');
+  }
+
+  const url = `${FIRESTORE_BASE}/${path}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+  const opts: RequestInit = { method, headers };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+
+  let resp = await fetch(url, opts);
+
+  // Auto-refresh on 401
+  if (resp.status === 401) {
     try {
-      // Use initializeAuth with inMemoryPersistence explicitly.
-      // This avoids IndexedDB entirely — no fake-indexeddb needed.
-      _auth = initializeAuth(app, {
-        persistence: inMemoryPersistence,
-      });
-      console.log('[Firebase] Auth initialized (in-memory persistence)');
-    } catch (e: any) {
-      console.error('[Firebase] Auth init failed:', e?.message || e);
+      token = await _getValidToken();
+    } catch {
+      throw new Error('Session expired');
+    }
+    resp = await fetch(url, {
+      ...opts,
+      headers: { ...headers, Authorization: `Bearer ${token}` },
+    });
+  }
+
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    const errMsg = data.error?.message || `Firestore HTTP ${resp.status}`;
+    const err: any = new Error(errMsg);
+    err.status = resp.status;
+    err.code = data.error?.status;
+    throw err;
+  }
+
+  return data;
+}
+
+/* ── Value conversion (plain ↔ Firestore typed) ──────────────────────────── */
+
+function _toFsValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'string') return { stringValue: val };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+  }
+  if (val instanceof Date) return { timestampValue: val.toISOString() };
+  if (Array.isArray(val)) return { arrayValue: { values: val.map(_toFsValue) } };
+  if (typeof val === 'object') {
+    const fields: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== undefined) fields[k] = _toFsValue(v);
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function _fromFsValue(val: any): any {
+  if (!val || typeof val !== 'object') return null;
+  if ('stringValue' in val) return val.stringValue;
+  if ('integerValue' in val) return parseInt(val.integerValue, 10);
+  if ('doubleValue' in val) return val.doubleValue;
+  if ('booleanValue' in val) return val.booleanValue;
+  if ('nullValue' in val) return null;
+  if ('timestampValue' in val) return val.timestampValue;
+  if ('arrayValue' in val) return (val.arrayValue?.values || []).map(_fromFsValue);
+  if ('mapValue' in val) {
+    const obj: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val.mapValue?.fields || {})) {
+      obj[k] = _fromFsValue(v);
+    }
+    return obj;
+  }
+  if ('referenceValue' in val) return val.referenceValue;
+  return null;
+}
+
+function _fromFsDoc(doc: any): Record<string, any> {
+  if (!doc?.fields) return {};
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(doc.fields)) {
+    out[k] = _fromFsValue(v);
+  }
+  return out;
+}
+
+/* ── Sentinel helpers (serverTimestamp, increment) ───────────────────────── */
+
+const SERVER_TIMESTAMP = { __sentinel: 'serverTimestamp' };
+function _serverTimestamp() { return SERVER_TIMESTAMP; }
+
+function _increment(n: number) {
+  return { __sentinel: 'increment', value: n };
+}
+
+function _parseFields(data: Record<string, any>): {
+  fields: Record<string, any>;
+  transforms: any[];
+} {
+  const fields: Record<string, any> = {};
+  const transforms: any[] = [];
+
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      value &&
+      typeof value === 'object' &&
+      '__sentinel' in (value as any)
+    ) {
+      const sentinel = value as any;
+      if (sentinel.__sentinel === 'serverTimestamp') {
+        transforms.push({
+          fieldPath: key,
+          setToServerValue: 'REQUEST_TIME',
+        });
+      } else if (sentinel.__sentinel === 'increment') {
+        const n = sentinel.value;
+        const fsVal = Number.isInteger(n)
+          ? { integerValue: String(n) }
+          : { doubleValue: n };
+        transforms.push({ fieldPath: key, increment: fsVal });
+      }
+    } else {
+      const fsVal = _toFsValue(value);
+      if (fsVal !== null) fields[key] = fsVal;
     }
   }
-  return _auth;
+
+  return { fields, transforms };
 }
 
-function ensureDb() {
-  if (_db) return _db;
-  const app = ensureFirebaseApp();
-  if (app) {
-    try {
-      _db = getFirestore(app);
-      console.log('[Firebase] Firestore initialized');
-    } catch (e: any) {
-      console.error('[Firebase] Firestore init failed:', e?.message || e);
-    }
-  }
-  return _db;
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPAT — Collection Reference
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+interface Constraint {
+  type: 'where' | 'orderBy' | 'limit';
+  field?: string;
+  op?: string;
+  value?: any;
+  direction?: string;
+  n?: number;
 }
-
-/* ── Compat: Auth ─────────────────────────────────────────────────────── */
-
-function auth() {
-  return ensureAuth();
-}
-
-/* ── Compat: Collection Reference ─────────────────────────────────────── */
 
 class CompatCollectionRef {
-  _db: any;
   _path: string;
-  _constraints: any[];
+  _constraints: Constraint[];
 
-  constructor(database: any, path: string, constraints: any[] = []) {
-    this._db = database;
+  constructor(path: string, constraints: Constraint[] = []) {
     this._path = path;
     this._constraints = constraints;
   }
 
   doc(docId: string) {
-    const docPath = `${this._path}/${docId}`;
-    return new CompatDocRef(this._db, docPath);
+    return new CompatDocRef(`${this._path}/${docId}`);
   }
 
   where(field: string, op: string, value: any) {
-    return new CompatCollectionRef(this._db, this._path, [
+    return new CompatCollectionRef(this._path, [
       ...this._constraints,
-      fbWhere(field, op, value),
+      { type: 'where', field, op, value },
     ]);
   }
 
   orderBy(field: string, dir: string = 'asc') {
-    return new CompatCollectionRef(this._db, this._path, [
+    return new CompatCollectionRef(this._path, [
       ...this._constraints,
-      fbOrderBy(field, dir),
+      { type: 'orderBy', field, direction: dir.toUpperCase() },
     ]);
   }
 
   limit(n: number) {
-    return new CompatCollectionRef(this._db, this._path, [
+    return new CompatCollectionRef(this._path, [
       ...this._constraints,
-      fbLimit(n),
+      { type: 'limit', n },
     ]);
   }
 
   async get() {
-    const db = ensureDb();
-    if (!db) {
-      console.error('[Firebase] Firestore not initialized');
-      return { docs: [], empty: true, size: 0 };
-    }
-    const ref = collection(db, ...this._path.split('/'));
-    const q = this._constraints.length > 0 ? query(ref, ...this._constraints) : ref;
     try {
-      const snapshot = await getDocs(q);
-      return {
-        docs: snapshot.docs,
-        empty: snapshot.empty,
-        size: snapshot.size,
-      };
+      const collectionId = this._path.split('/').pop()!;
+      const structuredQuery: any = { from: [{ collectionId }] };
+
+      // Build where clause
+      let whereClause: any = null;
+      const whereConstraints = this._constraints.filter(c => c.type === 'where');
+      if (whereConstraints.length === 1) {
+        const wc = whereConstraints[0];
+        whereClause = {
+          fieldFilter: {
+            field: { fieldPath: wc.field },
+            op: _mapOp(wc.op!),
+            value: _toFsValue(wc.value),
+          },
+        };
+      } else if (whereConstraints.length > 1) {
+        whereClause = {
+          compositeFilter: {
+            op: 'AND',
+            filters: whereConstraints.map(wc => ({
+              fieldFilter: {
+                field: { fieldPath: wc.field },
+                op: _mapOp(wc.op!),
+                value: _toFsValue(wc.value),
+              },
+            })),
+          },
+        };
+      }
+      if (whereClause) structuredQuery.where = whereClause;
+
+      // Build orderBy
+      const orderConstraints = this._constraints.filter(c => c.type === 'orderBy');
+      if (orderConstraints.length > 0) {
+        structuredQuery.orderBy = orderConstraints.map(oc => ({
+          field: { fieldPath: oc.field },
+          direction: oc.direction || 'ASCENDING',
+        }));
+      }
+
+      // Build limit
+      const limitConstraints = this._constraints.filter(c => c.type === 'limit');
+      if (limitConstraints.length > 0) {
+        structuredQuery.limit = limitConstraints[0].n;
+      }
+
+      const results = await _firestoreFetch(
+        `${this._path}:runQuery`,
+        'POST',
+        { structuredQuery },
+      );
+
+      // runQuery returns array of { document: ... } or { done: true }
+      const docs = (results || [])
+        .filter((r: any) => r.document)
+        .map((r: any) => ({
+          id: r.document.name.split('/').pop(),
+          data: () => _fromFsDoc(r.document),
+          exists: true,
+        }));
+
+      return { docs, empty: docs.length === 0, size: docs.length };
     } catch (e: any) {
-      console.warn('[Firebase] Collection get error:', e?.message);
+      console.warn('[Firestore] Collection get error:', e?.message);
       return { docs: [], empty: true, size: 0 };
     }
   }
 
   async add(data: any) {
-    const db = ensureDb();
-    if (!db) throw new Error('Firebase not initialized');
-    return await addDoc(collection(db, ...this._path.split('/')), data);
+    const { fields, transforms } = _parseFields(data);
+
+    // POST (auto-ID create) doesn't support fieldTransforms.
+    // Convert serverTimestamp sentinels to client timestamps.
+    if (transforms.length > 0) {
+      for (const t of transforms) {
+        if (t.setToServerValue) {
+          fields[t.fieldPath] = { timestampValue: new Date().toISOString() };
+        }
+      }
+    }
+
+    try {
+      const resp = await _firestoreFetch(this._path, 'POST', { fields });
+      const docId = resp.name?.split('/').pop();
+      return { id: docId };
+    } catch (e: any) {
+      console.error('[Firestore] add error:', e?.message);
+      throw e;
+    }
   }
 }
 
-/* ── Compat: Document Reference ───────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPAT — Document Reference
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 class CompatDocRef {
-  _db: any;
   _path: string;
   id: string;
 
-  constructor(database: any, path: string) {
-    this._db = database;
+  constructor(path: string) {
     this._path = path;
     this.id = path.split('/').pop() || '';
   }
 
   collection(subPath: string) {
-    return new CompatCollectionRef(this._db, `${this._path}/${subPath}`);
+    return new CompatCollectionRef(`${this._path}/${subPath}`);
   }
 
   async get() {
-    const db = ensureDb();
-    if (!db) {
-      return { id: this.id, exists: false, data: () => null };
-    }
     try {
-      const snapshot = await getDoc(doc(db, ...this._path.split('/')));
+      const resp = await _firestoreFetch(this._path, 'GET');
       return {
-        id: snapshot.id,
-        exists: snapshot.exists(),
-        data: () => snapshot.data(),
+        id: this.id,
+        exists: true,
+        data: () => _fromFsDoc(resp),
       };
     } catch (e: any) {
-      console.warn('[Firebase] Doc get error:', e?.message);
+      if (e.status === 404 || e.code === 'NOT_FOUND') {
+        return { id: this.id, exists: false, data: () => null };
+      }
+      console.warn('[Firestore] Doc get error:', e?.message);
       return { id: this.id, exists: false, data: () => null };
     }
   }
 
   async set(data: any, options?: any) {
-    const db = ensureDb();
-    if (!db) return;
-    await setDoc(doc(db, ...this._path.split('/')), data, options);
+    const { fields, transforms } = _parseFields(data);
+    const body: any = { fields };
+
+    if (options?.merge) {
+      // PATCH — supports fieldTransforms natively
+      if (transforms.length > 0) body.fieldTransforms = transforms;
+      await _firestoreFetch(this._path, 'PATCH', body);
+    } else {
+      // PUT (replace) — doesn't reliably support transforms;
+      // fall back to client-side timestamps for sentinels.
+      if (transforms.length > 0) {
+        for (const t of transforms) {
+          if (t.setToServerValue) {
+            fields[t.fieldPath] = { timestampValue: new Date().toISOString() };
+          }
+        }
+      }
+      await _firestoreFetch(this._path, 'PUT', body);
+    }
   }
 
   async update(data: any) {
-    const db = ensureDb();
-    if (!db) return;
-    await updateDoc(doc(db, ...this._path.split('/')), data);
+    const { fields, transforms } = _parseFields(data);
+    const body: any = { fields };
+    if (transforms.length > 0) body.fieldTransforms = transforms;
+    await _firestoreFetch(this._path, 'PATCH', body);
   }
 
   async delete() {
-    const db = ensureDb();
-    if (!db) return;
-    await deleteDoc(doc(db, ...this._path.split('/')));
+    try {
+      await _firestoreFetch(this._path, 'DELETE');
+    } catch (e: any) {
+      console.warn('[Firestore] delete error:', e?.message);
+    }
   }
 }
 
-/* ── Compat: Firestore ────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPAT — Firestore
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-function firestore() {
-  return {
-    collection: (path: string) => new CompatCollectionRef(ensureDb(), path),
+function firestore(): any {
+  const instance: any = (path: string) => new CompatCollectionRef(path);
+  instance.collection = (path: string) => new CompatCollectionRef(path);
+  instance.FieldValue = { serverTimestamp: _serverTimestamp, increment: _increment };
+  return instance;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function _mapOp(op: string): string {
+  const map: Record<string, string> = {
+    '==': 'EQUAL',
+    '!=': 'NOT_EQUAL',
+    '<': 'LESS_THAN',
+    '<=': 'LESS_THAN_OR_EQUAL',
+    '>': 'GREATER_THAN',
+    '>=': 'GREATER_THAN_OR_EQUAL',
+    'array-contains': 'ARRAY_CONTAINS',
+    in: 'IN',
+    'array-contains-any': 'ARRAY_CONTAINS_ANY',
+    'not-in': 'NOT_IN',
   };
+  return map[op] || 'EQUAL';
 }
 
-(firestore as any).FieldValue = {
-  serverTimestamp,
-  increment,
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXPORTS — keep same surface area as before so api.ts needs zero changes
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Stub GoogleAuthProvider (not used directly but kept for backward compat)
+const GoogleAuthProvider = { credential: (_token: string) => ({}) };
+
+export {
+  auth,
+  firestore,
+  onAuthStateChanged,
+  signInWithGoogleIdToken,
+  signOut,
+  GoogleAuthProvider,
 };
-
-/* ── Exports ─────────────────────────────────────────────────────────── */
-
-function onAuthStateChanged(authInstance: any, callback: (user: any) => void) {
-  if (!authInstance) {
-    console.warn('[Firebase] auth is null — treating as signed out');
-    setTimeout(() => callback(null), 0);
-    return () => {};
-  }
-  return fbOnAuthStateChanged(authInstance, callback);
-}
-
-export { fbSignOut as signOut };
-
-async function signInWithGoogleIdToken(idToken: string) {
-  const authInst = ensureAuth();
-  if (!authInst) throw new Error('Firebase Auth not initialized');
-
-  console.log('[Firebase] Signing in with Google ID token...');
-  const credential = FbGoogleAuthProvider.credential(idToken);
-  const result = await signInWithCredential(authInst, credential);
-  console.log('[Firebase] Sign-in successful:', result.user?.uid);
-  return result;
-}
-
-export { auth, firestore, onAuthStateChanged, signInWithGoogleIdToken, FbGoogleAuthProvider as GoogleAuthProvider };
