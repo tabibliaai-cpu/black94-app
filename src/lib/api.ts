@@ -1,4 +1,4 @@
-import { auth, firestore, onAuthStateChanged, signInWithCredential, GoogleAuthProvider, fbSignOut } from './firebase';
+import { auth, firestore, onAuthStateChanged, signInWithGoogleIdToken, signOut } from './firebase';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -57,9 +57,10 @@ export interface Message {
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
-function tsToMillis(ts: any): number {
+export function tsToMillis(ts: any): number {
   if (!ts) return Date.now();
   if (typeof ts === 'number') return ts;
+  if (typeof ts === 'string') return new Date(ts).getTime() || Date.now();
   if (ts?.toMillis) return ts.toMillis();
   if (ts?.toDate) return ts.toDate().getTime();
   if (ts?.seconds) return ts.seconds * 1000;
@@ -67,20 +68,27 @@ function tsToMillis(ts: any): number {
 }
 
 function currentUser(): any {
-  return auth().currentUser;
+  return auth()?.currentUser;
 }
 
 /* ── Auth ─────────────────────────────────────────────────────────────────── */
 
 export async function signInWithGoogle(idToken: string): Promise<User | null> {
   try {
-    const credential = GoogleAuthProvider.credential(idToken);
-    const userCredential = await signInWithCredential(auth(), credential);
+    const userCredential = await signInWithGoogleIdToken(idToken);
     const fbUser = userCredential.user;
+
+    if (!fbUser) return null;
 
     // Create or update user doc in Firestore
     const userDocRef = firestore().collection('users').doc(fbUser.uid);
-    const userDocSnap = await userDocRef.get();
+    let userDocSnap;
+    try {
+      userDocSnap = await userDocRef.get();
+    } catch (e) {
+      console.warn('[Auth] Firestore user doc fetch failed, creating new:', e);
+      userDocSnap = { exists: false, data: () => null };
+    }
     const username = fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid;
 
     const userData: any = {
@@ -99,95 +107,114 @@ export async function signInWithGoogle(idToken: string): Promise<User | null> {
 
     if (!userDocSnap.exists) {
       userData.createdAt = firestore.FieldValue.serverTimestamp();
-      await userDocRef.set(userData);
-      await firestore().collection('usernames').doc(username.toLowerCase()).set({ uid: fbUser.uid });
+      try {
+        await userDocRef.set(userData);
+        await firestore().collection('usernames').doc(username.toLowerCase()).set({ uid: fbUser.uid });
+      } catch (e) {
+        console.warn('[Auth] Failed to create user doc:', e);
+      }
     } else {
-      await userDocRef.update({
-        profileImage: fbUser.photoURL || null,
-        updatedAt: firestore.FieldValue.serverTimestamp(),
-      });
+      try {
+        await userDocRef.update({
+          profileImage: fbUser.photoURL || null,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        console.warn('[Auth] Failed to update user doc:', e);
+      }
     }
+
+    const existingData = userDocSnap.exists ? userDocSnap.data() : null;
 
     return {
       id: fbUser.uid,
       email: fbUser.email || '',
       username: username,
       displayName: userData.displayName,
-      bio: userDocSnap.exists ? (userDocSnap.data()?.bio || '') : '',
+      bio: existingData?.bio || '',
       profileImage: userData.profileImage,
-      coverImage: userDocSnap.exists ? (userDocSnap.data()?.coverImage || null) : null,
-      role: userDocSnap.exists ? (userDocSnap.data()?.role || 'personal') : 'personal',
-      badge: userDocSnap.exists ? (userDocSnap.data()?.badge || '') : '',
-      subscription: userDocSnap.exists ? (userDocSnap.data()?.subscription || 'free') : 'free',
-      isVerified: userDocSnap.exists ? (userDocSnap.data()?.isVerified || false) : false,
-      createdAt: userDocSnap.exists ? tsToMillis(userDocSnap.data()?.createdAt) : Date.now(),
+      coverImage: existingData?.coverImage || null,
+      role: existingData?.role || 'personal',
+      badge: existingData?.badge || '',
+      subscription: existingData?.subscription || 'free',
+      isVerified: existingData?.isVerified || false,
+      createdAt: tsToMillis(existingData?.createdAt),
     };
   } catch (error: any) {
-    if (error.code === '12501') return null;
+    if (error?.code === '12501') return null;
     console.error('[Auth] Google sign-in error:', error);
     throw error;
   }
 }
 
-export async function signOut(): Promise<void> {
+export async function signOutUser(): Promise<void> {
   try {
     const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
     await GoogleSignin.revokeAccess();
     await GoogleSignin.signOut();
   } catch {}
-  await fbSignOut(auth());
+  try {
+    await signOut(auth());
+  } catch {}
 }
 
 /* ── Posts ────────────────────────────────────────────────────────────────── */
 
 export async function fetchFeed(limitCount = 20): Promise<Post[]> {
-  const snapshot = await firestore()
-    .collection('posts')
-    .orderBy('createdAt', 'desc')
-    .limit(limitCount)
-    .get();
+  try {
+    const snapshot = await firestore()
+      .collection('posts')
+      .orderBy('createdAt', 'desc')
+      .limit(limitCount)
+      .get();
 
-  const userId = currentUser()?.uid;
-  const posts: Post[] = [];
+    const userId = currentUser()?.uid;
+    const posts: Post[] = [];
 
-  for (const docSnap of snapshot.docs) {
-    const data = docSnap.data();
-    let liked = false;
-    let bookmarked = false;
-    let reposted = false;
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data();
+      let liked = false;
+      let bookmarked = false;
+      let reposted = false;
 
-    if (userId) {
-      const [likeSnap, bookmarkSnap, repostSnap] = await Promise.all([
-        firestore().collection('post_likes').doc(`${docSnap.id}_${userId}`).get(),
-        firestore().collection('post_bookmarks').doc(`${docSnap.id}_${userId}`).get(),
-        firestore().collection('post_reposts').doc(`${docSnap.id}_${userId}`).get(),
-      ]);
-      liked = likeSnap.exists;
-      bookmarked = bookmarkSnap.exists;
-      reposted = repostSnap.exists;
+      if (userId) {
+        try {
+          const [likeSnap, bookmarkSnap, repostSnap] = await Promise.all([
+            firestore().collection('post_likes').doc(`${docSnap.id}_${userId}`).get(),
+            firestore().collection('post_bookmarks').doc(`${docSnap.id}_${userId}`).get(),
+            firestore().collection('post_reposts').doc(`${docSnap.id}_${userId}`).get(),
+          ]);
+          liked = likeSnap.exists;
+          bookmarked = bookmarkSnap.exists;
+          reposted = repostSnap.exists;
+        } catch {}
+      }
+
+      posts.push({
+        id: docSnap.id,
+        authorId: data.authorId || '',
+        authorUsername: data.authorUsername || '',
+        authorDisplayName: data.authorDisplayName || '',
+        authorProfileImage: data.authorProfileImage || null,
+        authorBadge: data.authorBadge || '',
+        authorIsVerified: data.authorIsVerified || false,
+        caption: data.caption || '',
+        mediaUrls: data.mediaUrls || [],
+        likeCount: data.likeCount || 0,
+        commentCount: data.commentCount || 0,
+        repostCount: data.repostCount || 0,
+        liked,
+        bookmarked,
+        reposted,
+        createdAt: tsToMillis(data.createdAt),
+      });
     }
 
-    posts.push({
-      id: docSnap.id,
-      authorId: data.authorId || '',
-      authorUsername: data.authorUsername || '',
-      authorDisplayName: data.authorDisplayName || '',
-      authorProfileImage: data.authorProfileImage || null,
-      authorBadge: data.authorBadge || '',
-      authorIsVerified: data.authorIsVerified || false,
-      caption: data.caption || '',
-      mediaUrls: data.mediaUrls || [],
-      likeCount: data.likeCount || 0,
-      commentCount: data.commentCount || 0,
-      repostCount: data.repostCount || 0,
-      liked,
-      bookmarked,
-      reposted,
-      createdAt: tsToMillis(data.createdAt),
-    });
+    return posts;
+  } catch (e) {
+    console.error('[Feed] Failed:', e);
+    return [];
   }
-
-  return posts;
 }
 
 export async function createPost(caption: string, mediaUrls: string[] = []): Promise<string> {
@@ -255,68 +282,78 @@ export async function fetchChatList(): Promise<Chat[]> {
   const userId = currentUser()?.uid;
   if (!userId) return [];
 
-  const [snap1, snap2] = await Promise.all([
-    firestore().collection('chats').where('user1Id', '==', userId).get(),
-    firestore().collection('chats').where('user2Id', '==', userId).get(),
-  ]);
-  const allDocs = [...snap1.docs, ...snap2.docs];
-  const chats: Chat[] = [];
+  try {
+    const [snap1, snap2] = await Promise.all([
+      firestore().collection('chats').where('user1Id', '==', userId).get(),
+      firestore().collection('chats').where('user2Id', '==', userId).get(),
+    ]);
+    const allDocs = [...snap1.docs, ...snap2.docs];
+    const chats: Chat[] = [];
 
-  for (const docSnap of allDocs) {
-    const data = docSnap.data();
-    const otherId = data.user1Id === userId ? data.user2Id : data.user1Id;
+    for (const docSnap of allDocs) {
+      const data = docSnap.data();
+      const otherId = data.user1Id === userId ? data.user2Id : data.user1Id;
 
-    try {
-      const otherSnap = await firestore().collection('users').doc(otherId).get();
-      const otherData = otherSnap.data();
-      chats.push({
-        id: docSnap.id,
-        user1Id: data.user1Id,
-        user2Id: data.user2Id,
-        lastMessage: data.lastMessage || '',
-        lastMessageTime: tsToMillis(data.lastMessageTime),
-        unreadCount: data.unreadCount || 0,
-        otherUser: otherData ? {
-          id: otherId,
-          email: otherData.email || '',
-          username: otherData.username || '',
-          displayName: otherData.displayName || '',
-          bio: otherData.bio || '',
-          profileImage: otherData.profileImage || null,
-          coverImage: otherData.coverImage || null,
-          role: otherData.role || 'personal',
-          badge: otherData.badge || '',
-          subscription: otherData.subscription || 'free',
-          isVerified: otherData.isVerified || false,
-          createdAt: tsToMillis(otherData.createdAt),
-        } : null,
-      });
-    } catch {}
+      try {
+        const otherSnap = await firestore().collection('users').doc(otherId).get();
+        const otherData = otherSnap.data();
+        chats.push({
+          id: docSnap.id,
+          user1Id: data.user1Id,
+          user2Id: data.user2Id,
+          lastMessage: data.lastMessage || '',
+          lastMessageTime: tsToMillis(data.lastMessageTime),
+          unreadCount: data.unreadCount || 0,
+          otherUser: otherData ? {
+            id: otherId,
+            email: otherData.email || '',
+            username: otherData.username || '',
+            displayName: otherData.displayName || '',
+            bio: otherData.bio || '',
+            profileImage: otherData.profileImage || null,
+            coverImage: otherData.coverImage || null,
+            role: otherData.role || 'personal',
+            badge: otherData.badge || '',
+            subscription: otherData.subscription || 'free',
+            isVerified: otherData.isVerified || false,
+            createdAt: tsToMillis(otherData.createdAt),
+          } : null,
+        });
+      } catch {}
+    }
+
+    return chats.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
+  } catch (e) {
+    console.error('[Chat] Failed:', e);
+    return [];
   }
-
-  return chats.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 }
 
 export async function fetchMessages(chatId: string, limitCount = 50): Promise<Message[]> {
-  const snapshot = await firestore()
-    .collection('chats')
-    .doc(chatId)
-    .collection('messages')
-    .orderBy('createdAt', 'asc')
-    .limit(limitCount)
-    .get();
+  try {
+    const snapshot = await firestore()
+      .collection('chats')
+      .doc(chatId)
+      .collection('messages')
+      .orderBy('createdAt', 'asc')
+      .limit(limitCount)
+      .get();
 
-  return snapshot.docs.map(docSnap => {
-    const data = docSnap.data();
-    return {
-      id: docSnap.id,
-      chatId,
-      senderId: data.senderId || '',
-      receiverId: data.receiverId || '',
-      content: data.content || '',
-      createdAt: tsToMillis(data.createdAt),
-    };
-  });
+    return snapshot.docs.map(docSnap => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        chatId,
+        senderId: data.senderId || '',
+        receiverId: data.receiverId || '',
+        content: data.content || '',
+        createdAt: tsToMillis(data.createdAt),
+      };
+    });
+  } catch (e) {
+    console.error('[Messages] Failed:', e);
+    return [];
+  }
 }
 
 export async function sendMessage(chatId: string, receiverId: string, content: string): Promise<void> {
@@ -343,23 +380,28 @@ export async function sendMessage(chatId: string, receiverId: string, content: s
 /* ── User ─────────────────────────────────────────────────────────────────── */
 
 export async function fetchUserProfile(userId: string): Promise<User | null> {
-  const docSnap = await firestore().collection('users').doc(userId).get();
-  if (!docSnap.exists) return null;
-  const data = docSnap.data();
-  return {
-    id: userId,
-    email: data?.email || '',
-    username: data?.username || '',
-    displayName: data?.displayName || '',
-    bio: data?.bio || '',
-    profileImage: data?.profileImage || null,
-    coverImage: data?.coverImage || null,
-    role: data?.role || 'personal',
-    badge: data?.badge || '',
-    subscription: data?.subscription || 'free',
-    isVerified: data?.isVerified || false,
-    createdAt: tsToMillis(data?.createdAt),
-  };
+  try {
+    const docSnap = await firestore().collection('users').doc(userId).get();
+    if (!docSnap.exists) return null;
+    const data = docSnap.data();
+    return {
+      id: userId,
+      email: data?.email || '',
+      username: data?.username || '',
+      displayName: data?.displayName || '',
+      bio: data?.bio || '',
+      profileImage: data?.profileImage || null,
+      coverImage: data?.coverImage || null,
+      role: data?.role || 'personal',
+      badge: data?.badge || '',
+      subscription: data?.subscription || 'free',
+      isVerified: data?.isVerified || false,
+      createdAt: tsToMillis(data?.createdAt),
+    };
+  } catch (e) {
+    console.error('[User] Profile fetch failed:', e);
+    return null;
+  }
 }
 
 export async function toggleFollow(targetUserId: string, currentlyFollowing: boolean): Promise<boolean> {

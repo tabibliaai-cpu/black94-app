@@ -28,7 +28,8 @@ type RouteParams = {
 export default function ChatRoomScreen() {
   const route = useRoute<RouteProp<RouteParams, 'ChatRoom'>>();
   const navigation = useNavigation();
-  const { chatId: routeChatId, userId: targetUserId } = route.params;
+  const params = route.params || {};
+  const { chatId: routeChatId, userId: targetUserId } = params;
   const currentUser = useAppStore((s) => s.user);
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState('');

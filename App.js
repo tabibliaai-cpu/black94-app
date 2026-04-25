@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Component, ReactNode } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import { onAuthStateChanged, auth } from './src/lib/firebase';
@@ -6,100 +6,155 @@ import Navigation from './src/navigation/AppNavigator';
 import { useAppStore } from './src/stores/app';
 import { fetchUserProfile } from './src/lib/api';
 
-function ErrorFallback({ error, retry }: { error: any; retry: () => void }) {
-  return (
-    <View style={styles.errorContainer}>
-      <Text style={styles.errorTitle}>Something went wrong</Text>
-      <Text style={styles.errorText}>{String(error?.message || 'Unknown error')}</Text>
-      <TouchableOpacity style={styles.retryButton} onPress={retry}>
-        <Text style={styles.retryText}>Try Again</Text>
-      </TouchableOpacity>
-    </View>
-  );
+/* ── Error Boundary ───────────────────────────────────────────────────────── */
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  onError: (error: Error) => void;
 }
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error('[App] Uncaught error:', error, errorInfo);
+    this.props.onError(error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.container}>
+          <StatusBar style="light" />
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorTitle}>Something went wrong</Text>
+            <Text style={styles.errorText}>{this.state.error?.message || 'Unknown error'}</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => {
+                this.setState({ hasError: false, error: null });
+                this.props.onError(null as any);
+              }}
+            >
+              <Text style={styles.retryText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ── App Component ────────────────────────────────────────────────────────── */
 
 export default function App() {
   const { user, setUser, setToken, setIsReady, isReady } = useAppStore();
   const [error, setError] = useState<any>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth(), async (fbUser) => {
-      try {
-        if (fbUser) {
-          // Always create a local user from Firebase auth data first
-          const baseUser = {
-            id: fbUser.uid,
-            email: fbUser.email || '',
-            username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
-            displayName: fbUser.displayName || 'User',
-            bio: '',
-            profileImage: fbUser.photoURL || null,
-            coverImage: null,
-            role: 'personal',
-            badge: '',
-            subscription: 'free',
-            isVerified: false,
-            createdAt: Date.now(),
-          };
+    let unsubscribe: (() => void) | undefined;
 
-          // Try to get enriched profile from Firestore — never fail the login
-          try {
-            const profile = await fetchUserProfile(fbUser.uid);
-            if (profile) {
-              setUser(profile);
-              setToken(profile.id);
-            } else {
-              setUser(baseUser);
-              setToken(baseUser.id);
-            }
-          } catch (firestoreErr) {
-            console.warn('Firestore profile fetch failed, using basic user:', firestoreErr?.message);
-            setUser(baseUser);
-            setToken(baseUser.id);
-          }
-        } else {
+    // Small delay to ensure all modules are loaded
+    const timer = setTimeout(() => {
+      try {
+        const authInstance = auth();
+
+        if (!authInstance) {
+          // Firebase auth not available — treat as signed out
+          console.warn('[App] Firebase Auth not initialized, showing login');
           setUser(null);
           setToken(null);
+          setIsReady(true);
+          return;
         }
-      } catch (err) {
-        console.error('Error processing auth state:', err);
+
+        unsubscribe = onAuthStateChanged(authInstance, async (fbUser) => {
+          try {
+            if (fbUser) {
+              const baseUser = {
+                id: fbUser.uid,
+                email: fbUser.email || '',
+                username: fbUser.displayName?.replace(/\s/g, '').toLowerCase() || fbUser.uid,
+                displayName: fbUser.displayName || 'User',
+                bio: '',
+                profileImage: fbUser.photoURL || null,
+                coverImage: null,
+                role: 'personal',
+                badge: '',
+                subscription: 'free',
+                isVerified: false,
+                createdAt: Date.now(),
+              };
+
+              try {
+                const profile = await fetchUserProfile(fbUser.uid);
+                if (profile) {
+                  setUser(profile);
+                  setToken(profile.id);
+                } else {
+                  setUser(baseUser);
+                  setToken(baseUser.id);
+                }
+              } catch (firestoreErr) {
+                console.warn('[App] Firestore profile fetch failed, using basic user');
+                setUser(baseUser);
+                setToken(baseUser.id);
+              }
+            } else {
+              setUser(null);
+              setToken(null);
+            }
+          } catch (err) {
+            console.error('[App] Error processing auth state:', err);
+            setUser(null);
+            setToken(null);
+          }
+          setIsReady(true);
+        });
+      } catch (initErr) {
+        console.error('[App] Firebase initialization error:', initErr);
         setUser(null);
         setToken(null);
+        setIsReady(true);
       }
-      setIsReady(true);
-    });
+    }, 100);
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timer);
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        <ErrorFallback
-          error={error}
-          retry={() => {
-            setError(null);
-            setIsReady(false);
-          }}
-        />
-      </View>
-    );
-  }
-
-  if (!isReady) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="light" />
-      </View>
-    );
-  }
-
   return (
-    <>
-      <StatusBar style="light" />
-      <Navigation />
-    </>
+    <AppErrorBoundary
+      onError={(err) => {
+        if (err) {
+          setError(err);
+        } else {
+          setError(null);
+          setIsReady(false);
+        }
+      }}
+    >
+      <>
+        <StatusBar style="light" />
+        {!isReady ? (
+          <View style={styles.container} />
+        ) : (
+          <Navigation />
+        )}
+      </>
+    </AppErrorBoundary>
   );
 }
 
@@ -107,8 +162,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#07060b',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   errorContainer: {
     flex: 1,

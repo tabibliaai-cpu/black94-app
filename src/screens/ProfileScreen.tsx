@@ -87,9 +87,9 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = async () => {
-    const { signOut } = await import('../lib/api');
+    const { signOutUser } = await import('../lib/api');
     try {
-      await signOut();
+      await signOutUser();
       useAppStore.getState().setUser(null);
       useAppStore.getState().setToken(null);
     } catch (err) {

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAppStore } from '../stores/app';
-import { signOut } from '../lib/api';
+import { signOutUser as signOut } from '../lib/api';
 import { firestore, auth } from '../lib/firebase';
 
 export default function SettingsScreen() {

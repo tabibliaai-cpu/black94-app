@@ -1,14 +1,15 @@
 // Firebase Web SDK with @react-native-firebase-compatible API
 // Web SDK works in React Native via Metro: auth uses HTTP, Firestore uses WebSocket/HTTP.
-// This wraps the web SDK so screens can use: auth(), firestore(), firestore.FieldValue, etc.
 
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
-  onAuthStateChanged,
+  onAuthStateChanged as fbOnAuthStateChanged,
   signOut as fbSignOut,
-  signInWithCredential,
-  GoogleAuthProvider,
+  signInWithCustomToken,
+  GoogleAuthProvider as FbGoogleAuthProvider,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -28,30 +29,57 @@ import {
   increment,
 } from 'firebase/firestore';
 
-/* ── Firebase Init ────────────────────────────────────────────────────────── */
+/* ── Firebase Init (lazy — won't crash if import fails) ─────────────────── */
 
-const firebaseConfig = {
-  apiKey: 'AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck',
-  authDomain: 'black94.firebaseapp.com',
-  projectId: 'black94',
-  storageBucket: 'black94.firebasestorage.app',
-  messagingSenderId: '210565807767',
-  appId: '1:210565807767:web:7ba097fc1980fce42373d2',
-  measurementId: 'G-9SRSQ1S4ME',
-};
+let _app: any = null;
+let _auth: any = null;
+let _db: any = null;
+let _initError: string | null = null;
 
-const firebaseApp = initializeApp(firebaseConfig);
-const authInstance = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
-
-/* ── Compat: Auth ─────────────────────────────────────────────────────────── */
-// auth() returns the web SDK Auth instance so auth().currentUser works.
-
-function auth() {
-  return authInstance;
+function getFirebaseApp() {
+  if (_app) return _app;
+  try {
+    _app = initializeApp({
+      apiKey: 'AIzaSyBAVWmNA9fo0hg4xRIi_O6ry3kAuuQylck',
+      authDomain: 'black94.firebaseapp.com',
+      projectId: 'black94',
+      storageBucket: 'black94.firebasestorage.app',
+      messagingSenderId: '210565807767',
+      appId: '1:210565807767:web:7ba097fc1980fce42373d2',
+      measurementId: 'G-9SRSQ1S4ME',
+    });
+  } catch (e: any) {
+    _initError = e?.message || 'Firebase init failed';
+    console.warn('[Firebase] Init error:', _initError);
+  }
+  return _app;
 }
 
-/* ── Compat: Collection Reference ────────────────────────────────────────── */
+function getAuthInstance() {
+  if (_auth) return _auth;
+  const app = getFirebaseApp();
+  if (app) {
+    try { _auth = getAuth(app); } catch (e: any) { _initError = e?.message || 'Auth init failed'; }
+  }
+  return _auth;
+}
+
+function getDbInstance() {
+  if (_db) return _db;
+  const app = getFirebaseApp();
+  if (app) {
+    try { _db = getFirestore(app); } catch (e: any) { _initError = e?.message || 'Firestore init failed'; }
+  }
+  return _db;
+}
+
+/* ── Compat: Auth ─────────────────────────────────────────────────────── */
+
+function auth() {
+  return getAuthInstance();
+}
+
+/* ── Compat: Collection Reference ─────────────────────────────────────── */
 
 class CompatCollectionRef {
   _db: any;
@@ -95,22 +123,31 @@ class CompatCollectionRef {
   }
 
   async get() {
-    const ref = this._ref();
+    const db = getDbInstance();
+    if (!db) return { docs: [], empty: true, size: 0 };
+    const ref = collection(db, ...this._path.split('/'));
     const q = this._constraints.length > 0 ? query(ref, ...this._constraints) : ref;
-    const snapshot = await getDocs(q);
-    return {
-      docs: snapshot.docs,
-      empty: snapshot.empty,
-      size: snapshot.size,
-    };
+    try {
+      const snapshot = await getDocs(q);
+      return {
+        docs: snapshot.docs,
+        empty: snapshot.empty,
+        size: snapshot.size,
+      };
+    } catch (e: any) {
+      console.warn('[Firebase] Collection get error:', e?.message);
+      return { docs: [], empty: true, size: 0 };
+    }
   }
 
   async add(data: any) {
-    return await addDoc(this._ref(), data);
+    const db = getDbInstance();
+    if (!db) throw new Error('Firebase not initialized');
+    return await addDoc(collection(db, ...this._path.split('/')), data);
   }
 }
 
-/* ── Compat: Document Reference ──────────────────────────────────────────── */
+/* ── Compat: Document Reference ───────────────────────────────────────── */
 
 class CompatDocRef {
   _db: any;
@@ -132,43 +169,78 @@ class CompatDocRef {
   }
 
   async get() {
-    const snapshot = await getDoc(this._ref());
-    return {
-      id: snapshot.id,
-      exists: snapshot.exists(),
-      data: () => snapshot.data(),
-    };
+    const db = getDbInstance();
+    if (!db) return { id: this.id, exists: false, data: () => null };
+    try {
+      const snapshot = await getDoc(doc(db, ...this._path.split('/')));
+      return {
+        id: snapshot.id,
+        exists: snapshot.exists(),
+        data: () => snapshot.data(),
+      };
+    } catch (e: any) {
+      console.warn('[Firebase] Doc get error:', e?.message);
+      return { id: this.id, exists: false, data: () => null };
+    }
   }
 
   async set(data: any, options?: any) {
-    await setDoc(this._ref(), data, options);
+    const db = getDbInstance();
+    if (!db) return;
+    await setDoc(doc(db, ...this._path.split('/')), data, options);
   }
 
   async update(data: any) {
-    await updateDoc(this._ref(), data);
+    const db = getDbInstance();
+    if (!db) return;
+    await updateDoc(doc(db, ...this._path.split('/')), data);
   }
 
   async delete() {
-    await deleteDoc(this._ref());
+    const db = getDbInstance();
+    if (!db) return;
+    await deleteDoc(doc(db, ...this._path.split('/')));
   }
 }
 
-/* ── Compat: Firestore ───────────────────────────────────────────────────── */
-// firestore() returns an object with .collection(path) for chaining queries.
-// firestore.FieldValue.serverTimestamp() and .increment() are static helpers.
+/* ── Compat: Firestore ────────────────────────────────────────────────── */
 
 function firestore() {
   return {
-    collection: (path: string) => new CompatCollectionRef(db, path),
+    collection: (path: string) => new CompatCollectionRef(getDbInstance(), path),
   };
 }
 
-// Static FieldValue helpers — screens use: firestore.FieldValue.serverTimestamp()
 (firestore as any).FieldValue = {
   serverTimestamp,
   increment,
 };
 
-/* ── Exports ─────────────────────────────────────────────────────────────── */
+/* ── Exports ─────────────────────────────────────────────────────────── */
 
-export { auth, firestore, onAuthStateChanged, fbSignOut, signInWithCredential, GoogleAuthProvider };
+// Wrap onAuthStateChanged to be safe — auth() might be null if init failed
+function onAuthStateChanged(authInstance: any, callback: (user: any) => void) {
+  if (!authInstance) {
+    // Firebase not initialized, treat as signed out
+    setTimeout(() => callback(null), 0);
+    return () => {};
+  }
+  return fbOnAuthStateChanged(authInstance, callback);
+}
+
+// Re-export signOut
+export { fbSignOut as signOut };
+
+// signInWithGoogleIdToken: converts a Google ID token to a Firebase user
+// Uses signInWithCustomToken via Firebase Auth REST API internally
+async function signInWithGoogleIdToken(idToken: string) {
+  const authInst = getAuthInstance();
+  if (!authInst) throw new Error('Firebase Auth not initialized');
+
+  // Use the web SDK's signInWithCredential with a Google OAuth credential
+  const credential = FbGoogleAuthProvider.credential(idToken);
+  const result = await (await import('firebase/auth')).signInWithCredential(authInst, credential);
+  return result;
+}
+
+export { auth, firestore, onAuthStateChanged, signInWithGoogleIdToken, FbGoogleAuthProvider as GoogleAuthProvider };
