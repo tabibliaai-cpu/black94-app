@@ -7,6 +7,7 @@ import {
   onAuthStateChanged as fbOnAuthStateChanged,
   signOut as fbSignOut,
   GoogleAuthProvider as FbGoogleAuthProvider,
+  signInWithCredential,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -19,21 +20,21 @@ import {
   deleteDoc,
   addDoc,
   query,
-  where,
-  orderBy,
-  limit,
+  where as fbWhere,
+  orderBy as fbOrderBy,
+  limit as fbLimit,
   serverTimestamp,
   increment,
 } from 'firebase/firestore';
 
-/* ── Firebase Init (lazy — won't crash if import fails) ─────────────────── */
+/* ── Firebase Init (eager — fail fast with clear error) ───────────────────── */
 
 let _app: any = null;
 let _auth: any = null;
 let _db: any = null;
 let _initError: string | null = null;
 
-function getFirebaseApp() {
+function ensureFirebaseApp() {
   if (_app) return _app;
   try {
     _app = initializeApp({
@@ -45,27 +46,40 @@ function getFirebaseApp() {
       appId: '1:210565807767:web:7ba097fc1980fce42373d2',
       measurementId: 'G-9SRSQ1S4ME',
     });
+    console.log('[Firebase] App initialized successfully');
   } catch (e: any) {
-    _initError = e?.message || 'Firebase init failed';
-    console.warn('[Firebase] Init error:', _initError);
+    _initError = 'Firebase init failed: ' + (e?.message || String(e));
+    console.error('[Firebase]', _initError);
   }
   return _app;
 }
 
-function getAuthInstance() {
+function ensureAuth() {
   if (_auth) return _auth;
-  const app = getFirebaseApp();
+  const app = ensureFirebaseApp();
   if (app) {
-    try { _auth = getAuth(app); } catch (e: any) { _initError = e?.message || 'Auth init failed'; }
+    try {
+      _auth = getAuth(app);
+      console.log('[Firebase] Auth initialized successfully');
+    } catch (e: any) {
+      _initError = 'Auth init failed: ' + (e?.message || String(e));
+      console.error('[Firebase]', _initError);
+    }
   }
   return _auth;
 }
 
-function getDbInstance() {
+function ensureDb() {
   if (_db) return _db;
-  const app = getFirebaseApp();
+  const app = ensureFirebaseApp();
   if (app) {
-    try { _db = getFirestore(app); } catch (e: any) { _initError = e?.message || 'Firestore init failed'; }
+    try {
+      _db = getFirestore(app);
+      console.log('[Firebase] Firestore initialized successfully');
+    } catch (e: any) {
+      _initError = 'Firestore init failed: ' + (e?.message || String(e));
+      console.error('[Firebase]', _initError);
+    }
   }
   return _db;
 }
@@ -73,7 +87,7 @@ function getDbInstance() {
 /* ── Compat: Auth ─────────────────────────────────────────────────────── */
 
 function auth() {
-  return getAuthInstance();
+  return ensureAuth();
 }
 
 /* ── Compat: Collection Reference ─────────────────────────────────────── */
@@ -89,10 +103,6 @@ class CompatCollectionRef {
     this._constraints = constraints;
   }
 
-  _ref() {
-    return collection(this._db, ...this._path.split('/'));
-  }
-
   doc(docId: string) {
     const docPath = `${this._path}/${docId}`;
     return new CompatDocRef(this._db, docPath);
@@ -101,27 +111,30 @@ class CompatCollectionRef {
   where(field: string, op: string, value: any) {
     return new CompatCollectionRef(this._db, this._path, [
       ...this._constraints,
-      where(field, op, value),
+      fbWhere(field, op, value),
     ]);
   }
 
   orderBy(field: string, dir: string = 'asc') {
     return new CompatCollectionRef(this._db, this._path, [
       ...this._constraints,
-      orderBy(field, dir),
+      fbOrderBy(field, dir),
     ]);
   }
 
   limit(n: number) {
     return new CompatCollectionRef(this._db, this._path, [
       ...this._constraints,
-      limit(n),
+      fbLimit(n),
     ]);
   }
 
   async get() {
-    const db = getDbInstance();
-    if (!db) return { docs: [], empty: true, size: 0 };
+    const db = ensureDb();
+    if (!db) {
+      console.error('[Firebase] Firestore not initialized for collection get');
+      return { docs: [], empty: true, size: 0 };
+    }
     const ref = collection(db, ...this._path.split('/'));
     const q = this._constraints.length > 0 ? query(ref, ...this._constraints) : ref;
     try {
@@ -138,7 +151,7 @@ class CompatCollectionRef {
   }
 
   async add(data: any) {
-    const db = getDbInstance();
+    const db = ensureDb();
     if (!db) throw new Error('Firebase not initialized');
     return await addDoc(collection(db, ...this._path.split('/')), data);
   }
@@ -157,17 +170,16 @@ class CompatDocRef {
     this.id = path.split('/').pop() || '';
   }
 
-  _ref() {
-    return doc(this._db, ...this._path.split('/'));
-  }
-
   collection(subPath: string) {
     return new CompatCollectionRef(this._db, `${this._path}/${subPath}`);
   }
 
   async get() {
-    const db = getDbInstance();
-    if (!db) return { id: this.id, exists: false, data: () => null };
+    const db = ensureDb();
+    if (!db) {
+      console.error('[Firebase] Firestore not initialized for doc get');
+      return { id: this.id, exists: false, data: () => null };
+    }
     try {
       const snapshot = await getDoc(doc(db, ...this._path.split('/')));
       return {
@@ -182,20 +194,29 @@ class CompatDocRef {
   }
 
   async set(data: any, options?: any) {
-    const db = getDbInstance();
-    if (!db) return;
+    const db = ensureDb();
+    if (!db) {
+      console.error('[Firebase] Firestore not initialized for doc set');
+      return;
+    }
     await setDoc(doc(db, ...this._path.split('/')), data, options);
   }
 
   async update(data: any) {
-    const db = getDbInstance();
-    if (!db) return;
+    const db = ensureDb();
+    if (!db) {
+      console.error('[Firebase] Firestore not initialized for doc update');
+      return;
+    }
     await updateDoc(doc(db, ...this._path.split('/')), data);
   }
 
   async delete() {
-    const db = getDbInstance();
-    if (!db) return;
+    const db = ensureDb();
+    if (!db) {
+      console.error('[Firebase] Firestore not initialized for doc delete');
+      return;
+    }
     await deleteDoc(doc(db, ...this._path.split('/')));
   }
 }
@@ -204,7 +225,7 @@ class CompatDocRef {
 
 function firestore() {
   return {
-    collection: (path: string) => new CompatCollectionRef(getDbInstance(), path),
+    collection: (path: string) => new CompatCollectionRef(ensureDb(), path),
   };
 }
 
@@ -219,6 +240,7 @@ function firestore() {
 function onAuthStateChanged(authInstance: any, callback: (user: any) => void) {
   if (!authInstance) {
     // Firebase not initialized, treat as signed out
+    console.warn('[Firebase] onAuthStateChanged called with null auth — treating as signed out');
     setTimeout(() => callback(null), 0);
     return () => {};
   }
@@ -229,14 +251,14 @@ function onAuthStateChanged(authInstance: any, callback: (user: any) => void) {
 export { fbSignOut as signOut };
 
 // signInWithGoogleIdToken: converts a Google ID token to a Firebase user
-// Uses signInWithCustomToken via Firebase Auth REST API internally
 async function signInWithGoogleIdToken(idToken: string) {
-  const authInst = getAuthInstance();
+  const authInst = ensureAuth();
   if (!authInst) throw new Error('Firebase Auth not initialized');
 
-  // Use the web SDK's signInWithCredential with a Google OAuth credential
+  console.log('[Firebase] Signing in with Google ID token...');
   const credential = FbGoogleAuthProvider.credential(idToken);
-  const result = await (await import('firebase/auth')).signInWithCredential(authInst, credential);
+  const result = await signInWithCredential(authInst, credential);
+  console.log('[Firebase] Sign-in successful, user:', result.user?.uid);
   return result;
 }
 
