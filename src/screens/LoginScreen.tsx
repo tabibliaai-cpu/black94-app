@@ -10,16 +10,12 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/build/providers/Google';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { signInWithGoogle } from '../lib/api';
 import { useAppStore } from '../stores/app';
 
-WebBrowser.maybeCompleteAuthSession();
-
-// Web OAuth client — NO SHA-1 certificate needed, works with any signing key
+// Web OAuth client ID — used by @react-native-google-signin to get the server auth code
 const WEB_CLIENT_ID = '210565807767-jtedotfd6hqn8cn31meuk2cfp2dkm88o.apps.googleusercontent.com';
 
 export default function LoginScreen() {
@@ -34,51 +30,46 @@ export default function LoginScreen() {
     }
   }, [user]);
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: WEB_CLIENT_ID,
-    scopes: ['profile', 'email'],
-  });
-
-  React.useEffect(() => {
-    if (response?.type === 'success' && response.authentication) {
-      handleGoogleToken(response.authentication);
-    }
-  }, [response]);
-
-  const handleGoogleToken = async (authResult: { idToken?: string }) => {
-    if (!authResult.idToken) {
-      Alert.alert('Error', 'Failed to get ID token from Google. Please try again.');
-      return;
-    }
-
+  const handleSignIn = async () => {
     setBusy(true);
     try {
-      const user = await signInWithGoogle(authResult.idToken);
-      if (user) {
-        setUser(user);
-        setToken(user.id);
+      // Use native Google Sign-In (Google Play Services) — same approach as SignupScreen
+      const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
+      GoogleSignin.configure({
+        webClientId: WEB_CLIENT_ID,
+        scopes: ['profile', 'email'],
+      });
+
+      await GoogleSignin.hasPlayServices();
+      await GoogleSignin.signIn();
+
+      // Get idToken — try getTokens() as fallback since signIn() may return null idToken
+      let idToken = null;
+      try {
+        const tokens = await GoogleSignin.getTokens();
+        idToken = tokens.idToken;
+      } catch (e) {
+        console.warn('[Login] getTokens failed:', e);
+      }
+
+      if (!idToken) {
+        Alert.alert('Error', 'Failed to get authentication token. Please check your Google Play Services.');
+        return;
+      }
+
+      const loggedInUser = await signInWithGoogle(idToken);
+      if (loggedInUser) {
+        setUser(loggedInUser);
+        setToken(loggedInUser.id);
         // Navigate to main tabs after successful login
         navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
       }
     } catch (error: any) {
       console.error('Sign in error:', error);
-      Alert.alert('Sign In Failed', error.message || 'Please try again');
+      if (error.code !== '12501') {
+        Alert.alert('Sign In Failed', error.message || 'Please try again');
+      }
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleSignIn = async () => {
-    if (!request) {
-      Alert.alert('Error', 'Google Sign-In is not ready. Please try again.');
-      return;
-    }
-    setBusy(true);
-    try {
-      await promptAsync();
-    } catch (error: any) {
-      console.error('Browser auth error:', error);
-      Alert.alert('Error', 'Could not open sign-in page.');
       setBusy(false);
     }
   };
@@ -99,7 +90,7 @@ export default function LoginScreen() {
         <TouchableOpacity
           style={styles.googleButton}
           onPress={handleSignIn}
-          disabled={busy || !request}
+          disabled={busy}
           activeOpacity={0.8}
         >
           {busy ? (
