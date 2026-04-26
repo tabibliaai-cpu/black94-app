@@ -154,7 +154,7 @@ async function _firestoreFetch(
     throw new Error('Not authenticated');
   }
 
-  const url = `${FIRESTORE_BASE}/${path}`;
+  const url = `${FIRESTORE_BASE}/${path}?key=${API_KEY}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
