@@ -1,4 +1,4 @@
-name: Build Android (APK + AAB)
+name: Build Android APK
 
 on:
   push:
@@ -14,7 +14,7 @@ env:
 
 jobs:
   build-android:
-    name: Build APK & AAB
+    name: Build Release APK
     runs-on: ubuntu-22.04
     timeout-minutes: 30
 
@@ -22,13 +22,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ env.NODE_VERSION }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - name: Setup Java JDK ${{ env.JAVA_VERSION }} (Zulu)
+      - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: zulu
@@ -36,19 +36,15 @@ jobs:
           cache: gradle
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
-      - name: Expo prebuild (generate android/)
+      - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
 
       - name: Decode release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::KEYSTORE_BASE64 secret is not set - release AAB will be unsigned"
-            exit 0
-          fi
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
           echo "Keystore decoded successfully"
 
@@ -67,81 +63,39 @@ jobs:
                   keyPassword System.getenv("KEY_PASSWORD") ?: ""
               }
           }
-          android.buildTypes.release.signingConfig = android.signingConfigs.release
+          android.buildTypes.all { buildType ->
+              buildType.signingConfig = android.signingConfigs.release
+          }
           GRADLE
 
           echo "" >> android/app/build.gradle
           echo "apply from: 'release-signing.gradle'" >> android/app/build.gradle
-          echo "Signing config injected into build.gradle"
+          echo "Signing config injected"
 
-      - name: Build Debug APK
-        run: cd android && ./gradlew assembleDebug --no-daemon --console=plain
-
-      - name: Build Release AAB
+      - name: Build Release APK
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-        run: cd android && ./gradlew bundleRelease --no-daemon --console=plain
+        run: cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --console=plain
 
-      - name: Collect build artifacts
-        run: |
-          mkdir -p artifacts
-          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/black94-debug.apk 2>/dev/null || true
-          cp android/app/build/outputs/bundle/release/app-release.aab artifacts/black94-release.aab 2>/dev/null || true
-          ls -lh artifacts/
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-builds
-          path: artifacts/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Create GitHub Release
-        id: release
+      - name: Upload APK to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk artifacts/black94-release.apk
+          ls -lh artifacts/
+          
           VERSION=$(node -p "require('./package.json').version")
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
           TAG="v${VERSION}-${TIMESTAMP}"
 
           gh release create "$TAG" \
-            artifacts/black94-debug.apk \
-            artifacts/black94-release.aab \
-            --title "Build ${{ github.run_number }} (v${VERSION})" \
-            --notes "Build #${{ github.run_number }} from ${{ github.ref_name }} ($SHORT_SHA)" \
+            artifacts/black94-release.apk \
+            --title "Black94 Build #${{ github.run_number }}" \
+            --notes "Release APK from commit $SHORT_SHA. Signed with release keystore." \
             --prerelease
 
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Notify Slack (optional)
-        if: always()
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [ -z "$SLACK_WEBHOOK_URL" ]; then
-            echo "Slack not configured - skipping notification"
-            exit 0
-          fi
-          curl -s -X POST "$SLACK_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\":\":$([ ${{ job.status }} = success ] && echo check || echo x): Build #${{ github.run_number }} - ${{ job.status }}\"}" || true
-
-  notify:
-    name: Build Status
-    runs-on: ubuntu-22.04
-    needs: build-android
-    if: always()
-    steps:
-      - name: Print result
-        run: |
-          if [ "${{ needs.build-android.result }}" = "success" ]; then
-            echo "BUILD SUCCEEDED - artifacts in GitHub Releases"
-          else
-            echo "BUILD FAILED - check logs"
-            exit 1
-          fi
+          echo "Release created: $TAG"
