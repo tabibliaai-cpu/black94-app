@@ -23,9 +23,16 @@ WebBrowser.maybeCompleteAuthSession();
 const WEB_CLIENT_ID = '210565807767-jtedotfd6hqn8cn31meuk2cfp2dkm88o.apps.googleusercontent.com';
 
 export default function LoginScreen() {
-  const { setUser, setToken } = useAppStore();
-  const navigation = useNavigation();
+  const { setUser, setToken, user } = useAppStore();
+  const navigation = useNavigation<any>();
   const [busy, setBusy] = React.useState(false);
+
+  // If user is already logged in, redirect to main tabs
+  React.useEffect(() => {
+    if (user) {
+      navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
+    }
+  }, [user]);
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     clientId: WEB_CLIENT_ID,
@@ -50,6 +57,8 @@ export default function LoginScreen() {
       if (user) {
         setUser(user);
         setToken(user.id);
+        // Navigate to main tabs after successful login
+        navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
       }
     } catch (error: any) {
       console.error('Sign in error:', error);
@@ -107,7 +116,7 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity
-          onPress={() => navigation.navigate('Signup' as never)}
+          onPress={() => navigation.navigate('Signup')}
           style={styles.switchTextContainer}
         >
           <Text style={styles.switchText}>

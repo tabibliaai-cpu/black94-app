@@ -108,6 +108,9 @@ async function _getValidToken(): Promise<string> {
 
   if (!_refreshToken) throw new Error('Not authenticated');
 
+  // Invalidate cached token before attempting refresh
+  _idToken = null;
+
   try {
     const resp = await fetch(
       `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`,
@@ -126,11 +129,11 @@ async function _getValidToken(): Promise<string> {
     _refreshToken = data.refresh_token || _refreshToken;
     return _idToken;
   } catch (e: any) {
-    // Session is dead — clear state
-    _authUser = null;
+    // Refresh failed — clear everything only if refresh token is truly dead
     _idToken = null;
     _refreshToken = null;
-    _notifyAuthListeners();
+    // Do NOT clear _authUser here — let the caller decide.
+    // This prevents mid-session data loss on transient errors.
     throw new Error('Session expired — please sign in again');
   }
 }
@@ -161,8 +164,9 @@ async function _firestoreFetch(
 
   let resp = await fetch(url, opts);
 
-  // Auto-refresh on 401
+  // Auto-refresh on 401 — invalidate token first so refresh actually runs
   if (resp.status === 401) {
+    _idToken = null; // Force refresh
     try {
       token = await _getValidToken();
     } catch {
