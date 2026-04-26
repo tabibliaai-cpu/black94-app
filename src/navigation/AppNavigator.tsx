@@ -17,6 +17,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import ChatRoomScreen from '../screens/ChatRoomScreen';
+import ReportScreen from '../screens/ReportScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -129,6 +130,11 @@ export default function Navigation() {
         <Stack.Screen
           name="ChatRoom"
           component={ChatRoomScreen}
+          options={{ presentation: 'modal' }}
+        />
+        <Stack.Screen
+          name="Report"
+          component={ReportScreen}
           options={{ presentation: 'modal' }}
         />
       </Stack.Navigator>

@@ -122,6 +122,8 @@ export default function SettingsScreen() {
           <View style={styles.card}>
             <SettingsLink icon="lock-closed" label="Privacy Settings" />
             <SettingsLink icon="share-social" label="Share Profile" />
+            <SettingsLink icon="document-text-outline" label="Community Guidelines"
+              onPress={() => Linking.openURL('https://black94.web.app/community-guidelines.html')} />
           </View>
         </View>
 
@@ -155,9 +157,9 @@ export default function SettingsScreen() {
   );
 }
 
-function SettingsLink({ icon, label }: { icon: string; label: string }) {
+function SettingsLink({ icon, label, onPress }: { icon: string; label: string; onPress?: () => void }) {
   return (
-    <TouchableOpacity style={styles.linkItem}>
+    <TouchableOpacity style={styles.linkItem} onPress={onPress}>
       <Ionicons name={icon as any} size={18} color={colors.textSecondary} />
       <Text style={styles.linkText}>{label}</Text>
       <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
