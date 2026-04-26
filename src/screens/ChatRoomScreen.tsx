@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -35,12 +35,17 @@ export default function ChatRoomScreen() {
   const [input, setInput] = React.useState('');
   const [chatId, setChatId] = React.useState(routeChatId || '');
 
-  React.useEffect(() => {
-    if (chatId) loadMessages();
-    else if (targetUserId) findOrCreateChat();
-  }, [chatId, targetUserId]);
+  const loadMessages = useCallback(async () => {
+    if (!chatId) return;
+    try {
+      const msgs = await fetchMessages(chatId);
+      setMessages(msgs);
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    }
+  }, [chatId]);
 
-  const findOrCreateChat = async () => {
+  const findOrCreateChat = useCallback(async () => {
     const uid = auth().currentUser?.uid;
     if (!uid || !targetUserId) return;
 
@@ -76,17 +81,12 @@ export default function ChatRoomScreen() {
       updatedAt: firestore.FieldValue.serverTimestamp(),
     });
     setChatId(docRef.id);
-  };
+  }, [targetUserId]);
 
-  const loadMessages = async () => {
-    if (!chatId) return;
-    try {
-      const msgs = await fetchMessages(chatId);
-      setMessages(msgs);
-    } catch (err) {
-      console.error('Failed to load messages:', err);
-    }
-  };
+  React.useEffect(() => {
+    if (chatId) loadMessages();
+    else if (targetUserId) findOrCreateChat();
+  }, [chatId, targetUserId, loadMessages, findOrCreateChat]);
 
   const handleSend = async () => {
     if (!input.trim() || !chatId || !targetUserId) return;

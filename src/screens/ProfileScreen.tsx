@@ -37,24 +37,27 @@ export default function ProfileScreen() {
         .limit(20)
         .get();
 
-      const list: Post[] = snapshot.docs.map(doc => ({
+      const list: Post[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
         id: doc.id,
-        authorId: doc.data().authorId || '',
-        authorUsername: doc.data().authorUsername || '',
-        authorDisplayName: doc.data().authorDisplayName || '',
-        authorProfileImage: doc.data().authorProfileImage || null,
-        authorBadge: doc.data().authorBadge || '',
-        authorIsVerified: doc.data().authorIsVerified || false,
-        caption: doc.data().caption || '',
-        mediaUrls: parseMediaUrls(doc.data().mediaUrls),
-        likeCount: doc.data().likeCount || 0,
-        commentCount: doc.data().commentCount || 0,
-        repostCount: doc.data().repostCount || 0,
+        authorId: data.authorId || '',
+        authorUsername: data.authorUsername || '',
+        authorDisplayName: data.authorDisplayName || '',
+        authorProfileImage: data.authorProfileImage || null,
+        authorBadge: data.authorBadge || '',
+        authorIsVerified: data.authorIsVerified || false,
+        caption: data.caption || '',
+        mediaUrls: parseMediaUrls(data.mediaUrls),
+        likeCount: data.likeCount || 0,
+        commentCount: data.commentCount || 0,
+        repostCount: data.repostCount || 0,
         liked: false,
         bookmarked: false,
         reposted: false,
-        createdAt: tsToMillis(doc.data().createdAt),
-      })).sort(
+        createdAt: tsToMillis(data.createdAt),
+        };
+      }).sort(
         (a, b) => b.createdAt - a.createdAt
       );
       setPosts(list);

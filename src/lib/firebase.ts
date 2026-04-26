@@ -94,7 +94,9 @@ async function signOut(_authRef?: any) {
 // Decode JWT payload to check expiry (no library needed)
 function _isTokenExpired(token: string): boolean {
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    // JWT uses base64url encoding — convert to standard base64 for atob()
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64));
     // Consider expired if less than 60 seconds remaining
     return payload.exp * 1000 < Date.now() + 60000;
   } catch {

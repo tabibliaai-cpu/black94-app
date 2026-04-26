@@ -303,6 +303,8 @@ export async function fetchChatList(): Promise<Chat[]> {
     for (const docSnap of allDocs) {
       const data = docSnap.data();
       const otherId = data.user1Id === userId ? data.user2Id : data.user1Id;
+      const isUser1 = data.user1Id === userId;
+      const unreadCount = isUser1 ? (data.unreadUser1 || 0) : (data.unreadUser2 || 0);
 
       try {
         const otherSnap = await firestore().collection('users').doc(otherId).get();
@@ -313,7 +315,7 @@ export async function fetchChatList(): Promise<Chat[]> {
           user2Id: data.user2Id,
           lastMessage: data.lastMessage || '',
           lastMessageTime: tsToMillis(data.lastMessageTime),
-          unreadCount: data.unreadCount || 0,
+          unreadCount,
           otherUser: otherData ? {
             id: otherId,
             email: otherData.email || '',
@@ -380,10 +382,18 @@ export async function sendMessage(chatId: string, receiverId: string, content: s
     createdAt: firestore.FieldValue.serverTimestamp(),
   });
 
+  // Increment unread count for receiver, reset sender's unread to 0
+  const chatDoc = await firestore().collection('chats').doc(chatId).get();
+  const chatData = chatDoc.exists ? chatDoc.data() : null;
+  const senderIsUser1 = chatData?.user1Id === userId;
+  const senderUnreadField = senderIsUser1 ? 'unreadUser1' : 'unreadUser2';
+  const receiverUnreadField = senderIsUser1 ? 'unreadUser2' : 'unreadUser1';
+
   await firestore().collection('chats').doc(chatId).update({
     lastMessage: content,
     lastMessageTime: firestore.FieldValue.serverTimestamp(),
-    unreadCount: firestore.FieldValue.increment(1),
+    [receiverUnreadField]: firestore.FieldValue.increment(1),
+    [senderUnreadField]: 0,
   });
 }
 
