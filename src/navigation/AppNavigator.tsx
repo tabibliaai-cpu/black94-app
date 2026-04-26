@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
@@ -17,7 +17,6 @@ import ProfileScreen from '../screens/ProfileScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import ChatRoomScreen from '../screens/ChatRoomScreen';
-import ReportScreen from '../screens/ReportScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -123,20 +122,22 @@ export default function Navigation() {
   return (
     <NavigationContainer theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Signup" component={SignupScreen} />
-        <Stack.Screen name="MainTabs" component={TabNavigator} />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen
-          name="ChatRoom"
-          component={ChatRoomScreen}
-          options={{ presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="Report"
-          component={ReportScreen}
-          options={{ presentation: 'modal' }}
-        />
+        {!user ? (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Signup" component={SignupScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="MainTabs" component={TabNavigator} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen
+              name="ChatRoom"
+              component={ChatRoomScreen}
+              options={{ presentation: 'modal' }}
+            />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

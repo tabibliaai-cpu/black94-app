@@ -16,15 +16,8 @@ import { signInWithGoogle } from '../lib/api';
 import { useAppStore } from '../stores/app';
 
 export default function SignupScreen() {
-  const { setUser, setToken, user } = useAppStore();
-  const navigation = useNavigation<any>();
-
-  // If user is already logged in, redirect to main tabs
-  React.useEffect(() => {
-    if (user) {
-      navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
-    }
-  }, [user]);
+  const { setUser, setToken } = useAppStore();
+  const navigation = useNavigation();
   const [busy, setBusy] = React.useState(false);
 
   const handleSignUp = async () => {
@@ -57,7 +50,6 @@ export default function SignupScreen() {
       if (user) {
         setUser(user);
         setToken(user.id);
-        navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
       }
     } catch (error: any) {
       console.error('Sign up error:', error);
@@ -102,7 +94,7 @@ export default function SignupScreen() {
         </View>
 
         <TouchableOpacity
-          onPress={() => navigation.navigate('Login')}
+          onPress={() => navigation.navigate('Login' as never)}
           style={styles.switchTextContainer}
         >
           <Text style={styles.switchText}>

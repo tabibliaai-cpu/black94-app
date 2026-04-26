@@ -15,28 +15,18 @@ import { colors } from '../theme/colors';
 import { signInWithGoogle } from '../lib/api';
 import { useAppStore } from '../stores/app';
 
-// Web OAuth client ID — used by @react-native-google-signin to get the server auth code
-const WEB_CLIENT_ID = '210565807767-jtedotfd6hqn8cn31meuk2cfp2dkm88o.apps.googleusercontent.com';
-
 export default function LoginScreen() {
-  const { setUser, setToken, user } = useAppStore();
-  const navigation = useNavigation<any>();
+  const { setUser, setToken } = useAppStore();
+  const navigation = useNavigation();
   const [busy, setBusy] = React.useState(false);
-
-  // If user is already logged in, redirect to main tabs
-  React.useEffect(() => {
-    if (user) {
-      navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
-    }
-  }, [user]);
 
   const handleSignIn = async () => {
     setBusy(true);
     try {
-      // Use native Google Sign-In (Google Play Services) — same approach as SignupScreen
+      // Step 1: Get Google Sign-In token
       const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
       GoogleSignin.configure({
-        webClientId: WEB_CLIENT_ID,
+        webClientId: '210565807767-jtedotfd6hqn8cn31meuk2cfp2dkm88o.apps.googleusercontent.com',
         scopes: ['profile', 'email'],
       });
 
@@ -44,6 +34,7 @@ export default function LoginScreen() {
       await GoogleSignin.signIn();
 
       // Get idToken — try getTokens() as fallback since signIn() may return null idToken
+      // when the server-side code exchange fails silently
       let idToken = null;
       try {
         const tokens = await GoogleSignin.getTokens();
@@ -57,12 +48,11 @@ export default function LoginScreen() {
         return;
       }
 
-      const loggedInUser = await signInWithGoogle(idToken);
-      if (loggedInUser) {
-        setUser(loggedInUser);
-        setToken(loggedInUser.id);
-        // Navigate to main tabs after successful login
-        navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
+      // Step 2: Sign in with Firebase using the token
+      const user = await signInWithGoogle(idToken);
+      if (user) {
+        setUser(user);
+        setToken(user.id);
       }
     } catch (error: any) {
       console.error('Sign in error:', error);
@@ -107,7 +97,7 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity
-          onPress={() => navigation.navigate('Signup')}
+          onPress={() => navigation.navigate('Signup' as never)}
           style={styles.switchTextContainer}
         >
           <Text style={styles.switchText}>

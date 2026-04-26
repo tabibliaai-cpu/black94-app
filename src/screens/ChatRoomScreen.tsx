@@ -120,16 +120,7 @@ export default function ChatRoomScreen() {
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chat</Text>
-        <TouchableOpacity
-          onPress={() => targetUserId && navigation.navigate('Report' as never, {
-            contentType: 'user',
-            contentId: chatId || '',
-            reportedUserId: targetUserId,
-            reportedUserName: 'This user',
-          } as never)}
-        >
-          <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-        </TouchableOpacity>
+        <View style={{ width: 22 }} />
       </View>
 
       <FlatList

@@ -10,7 +10,6 @@ import {
   SafeAreaView,
   StatusBar,
   TextInput,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -104,12 +103,8 @@ function PostCard({ post, onLike, onBookmark }: {
           <Text style={styles.actionText}>{post.repostCount || ''}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionBtn}>
-          <Ionicons name="share-outline" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
-
         <TouchableOpacity
-          style={[styles.actionBtn]}
+          style={[styles.actionBtn, { marginLeft: 'auto' }]}
           onPress={() => onBookmark(post.id, post.bookmarked)}
         >
           <Ionicons
@@ -117,19 +112,6 @@ function PostCard({ post, onLike, onBookmark }: {
             size={20}
             color={post.bookmarked ? colors.primary : colors.textSecondary}
           />
-        </TouchableOpacity>
-
-        {/* Report / More button */}
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={() => navigation.navigate('Report', {
-            contentType: 'post',
-            contentId: post.id,
-            reportedUserId: post.authorId,
-            reportedUserName: post.authorDisplayName,
-          })}
-        >
-          <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
     </View>

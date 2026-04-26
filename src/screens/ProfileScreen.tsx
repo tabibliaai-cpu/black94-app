@@ -83,8 +83,6 @@ export default function ProfileScreen() {
       await signOutUser();
       useAppStore.getState().setUser(null);
       useAppStore.getState().setToken(null);
-      // Reset navigation to login screen
-      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (err) {
       console.error('Logout failed:', err);
     }
