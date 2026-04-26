@@ -505,9 +505,11 @@ class CompatDocRef {
 function firestore(): any {
   const instance: any = (path: string) => new CompatCollectionRef(path);
   instance.collection = (path: string) => new CompatCollectionRef(path);
-  instance.FieldValue = { serverTimestamp: _serverTimestamp, increment: _increment };
   return instance;
 }
+
+// Static access: api.ts uses firestore.FieldValue.serverTimestamp()
+(firestore as any).FieldValue = { serverTimestamp: _serverTimestamp, increment: _increment };
 
 /* ═══════════════════════════════════════════════════════════════════════════
    HELPERS
