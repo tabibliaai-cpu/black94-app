@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAppStore } from '../stores/app';
-import { fetchUserProfile, checkFollowing, toggleFollow, Post, tsToMillis } from '../lib/api';
+import { fetchUserProfile, checkFollowing, toggleFollow, Post, tsToMillis, parseMediaUrls } from '../lib/api';
 import { firestore, auth } from '../lib/firebase';
 
 export default function ProfileScreen() {
@@ -34,7 +34,6 @@ export default function ProfileScreen() {
       const snapshot = await firestore()
         .collection('posts')
         .where('authorId', '==', user.id)
-        .orderBy('createdAt', 'desc')
         .limit(20)
         .get();
 
@@ -47,7 +46,7 @@ export default function ProfileScreen() {
         authorBadge: doc.data().authorBadge || '',
         authorIsVerified: doc.data().authorIsVerified || false,
         caption: doc.data().caption || '',
-        mediaUrls: doc.data().mediaUrls || [],
+        mediaUrls: parseMediaUrls(doc.data().mediaUrls),
         likeCount: doc.data().likeCount || 0,
         commentCount: doc.data().commentCount || 0,
         repostCount: doc.data().repostCount || 0,
@@ -55,7 +54,9 @@ export default function ProfileScreen() {
         bookmarked: false,
         reposted: false,
         createdAt: tsToMillis(doc.data().createdAt),
-      }));
+      })).sort(
+        (a, b) => b.createdAt - a.createdAt
+      );
       setPosts(list);
 
       // Count followers/following

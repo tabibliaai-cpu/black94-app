@@ -57,6 +57,16 @@ export interface Message {
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
+export function parseMediaUrls(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === 'string') {
+    if (raw.startsWith('data:')) return [raw];
+    return raw.split(',').map(u => u.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export function tsToMillis(ts: any): number {
   if (!ts) return Date.now();
   if (typeof ts === 'number') return ts;
@@ -199,7 +209,7 @@ export async function fetchFeed(limitCount = 20): Promise<Post[]> {
         authorBadge: data.authorBadge || '',
         authorIsVerified: data.authorIsVerified || false,
         caption: data.caption || '',
-        mediaUrls: data.mediaUrls || [],
+        mediaUrls: parseMediaUrls(data.mediaUrls),
         likeCount: data.likeCount || 0,
         commentCount: data.commentCount || 0,
         repostCount: data.repostCount || 0,

@@ -156,16 +156,16 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#07060b',
+    backgroundColor: '#000000',
   },
   loadingText: {
-    color: '#a3d977',
+    color: '#1d9bf0',
     fontSize: 16,
     textAlign: 'center',
     marginTop: 100,
   },
   errorContainer: {
-    backgroundColor: '#07060b',
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#e8f0dc',
+    color: '#e7e9ea',
     marginBottom: 12,
   },
   errorMessage: {
@@ -192,14 +192,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   retryButton: {
-    backgroundColor: '#a3d977',
+    backgroundColor: '#1d9bf0',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 24,
     marginTop: 8,
   },
   retryText: {
-    color: '#07060b',
+    color: '#000000',
     fontSize: 15,
     fontWeight: '600',
   },
