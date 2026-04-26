@@ -42,12 +42,6 @@
           "iosUrlScheme": "com.googleusercontent.apps.210565807767-jtedotfd6hqn8cn31meuk2cfp2dkm88o"
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "5df26f67-31b9-4978-a98b-18a4964fe585"
-      }
-    },
-    "owner": "cornelius1stcen"
+    ]
   }
 }

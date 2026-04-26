@@ -80,20 +80,8 @@ async function signInWithGoogleIdToken(googleIdToken: string) {
 }
 
 async function signOut(_authRef?: any) {
-  // Revoke refresh token server-side (best-effort)
-  if (_refreshToken) {
-    try {
-      await fetch(
-        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken: _idToken }),
-        },
-      );
-    } catch { /* ignore */ }
-  }
-
+  // Firebase REST API has no dedicated sign-out endpoint.
+  // Local token clearing is sufficient. Google OAuth revoke is handled in api.ts.
   _authUser = null;
   _idToken = null;
   _refreshToken = null;
@@ -103,8 +91,20 @@ async function signOut(_authRef?: any) {
 
 /* ── Token refresh ────────────────────────────────────────────────────────── */
 
+// Decode JWT payload to check expiry (no library needed)
+function _isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    // Consider expired if less than 60 seconds remaining
+    return payload.exp * 1000 < Date.now() + 60000;
+  } catch {
+    return true; // If we can't parse, assume expired
+  }
+}
+
 async function _getValidToken(): Promise<string> {
-  if (_idToken) return _idToken;
+  // Check if current token is still valid
+  if (_idToken && !_isTokenExpired(_idToken)) return _idToken;
 
   if (!_refreshToken) throw new Error('Not authenticated');
 

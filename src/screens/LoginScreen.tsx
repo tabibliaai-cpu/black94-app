@@ -33,21 +33,20 @@ export default function LoginScreen() {
   });
 
   React.useEffect(() => {
-    if (response?.type === 'success') {
-      handleGoogleToken(response.authentication?.accessToken);
+    if (response?.type === 'success' && response.authentication) {
+      handleGoogleToken(response.authentication);
     }
   }, [response]);
 
-  const handleGoogleToken = async (accessToken: string | undefined) => {
-    if (!accessToken) {
-      Alert.alert('Error', 'Failed to get authentication token.');
+  const handleGoogleToken = async (authResult: { idToken?: string }) => {
+    if (!authResult.idToken) {
+      Alert.alert('Error', 'Failed to get ID token from Google. Please try again.');
       return;
     }
 
     setBusy(true);
     try {
-      // Exchange Google access token for Firebase ID token, then sign in
-      const user = await signInWithGoogle(accessToken);
+      const user = await signInWithGoogle(authResult.idToken);
       if (user) {
         setUser(user);
         setToken(user.id);
