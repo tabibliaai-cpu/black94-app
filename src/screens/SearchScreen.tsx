@@ -1,187 +1,199 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Image,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
-  FlatList,
+  View, Text, TextInput, FlatList, Image, TouchableOpacity,
+  StyleSheet, ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
-import { useAppStore } from '../stores/app';
-import { auth, firestore } from '../lib/firebase';
+import { firestore } from '../lib/firebase';
+import { User, Post, tsToMillis, parseMediaUrls } from '../lib/api';
 
-interface SearchResult {
-  id: string;
-  displayName: string;
-  username: string;
-  profileImage: string | null;
-  bio: string;
-  isVerified: boolean;
+function Avatar({ uri, size = 44 }: { uri?: string | null; size?: number }) {
+  return uri ? (
+    <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#222' }} />
+  ) : (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#333', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#fff', fontSize: size * 0.4, fontWeight: '700' }}>?</Text>
+    </View>
+  );
 }
 
-export default function SearchScreen() {
-  const navigation = useNavigation<any>();
-  const [query, setQuery] = React.useState('');
-  const [results, setResults] = React.useState<SearchResult[]>([]);
-  const [searching, setSearching] = React.useState(false);
+export default function SearchScreen({ navigation }: any) {
+  const [query, setQuery] = useState('');
+  const [users, setUsers] = useState<User[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
 
-  const handleSearch = async (text: string) => {
-    setQuery(text);
-    if (text.length < 2) {
-      setResults([]);
-      return;
-    }
-    setSearching(true);
+  const doSearch = useCallback(async (q: string) => {
+    if (!q.trim()) { setUsers([]); setPosts([]); setSearched(false); return; }
+    setLoading(true);
+    setSearched(true);
     try {
-      const snapshot = await firestore()
-        .collection('users')
-        .where('usernameLower', '>=', text.toLowerCase())
-        .where('usernameLower', '<=', text.toLowerCase() + '\uf8ff')
-        .limit(20)
-        .get();
+      const lower = q.toLowerCase();
+      const [uSnap, pSnap] = await Promise.all([
+        firestore().collection('users')
+          .where('usernameLower', '>=', lower)
+          .where('usernameLower', '<=', lower + '\uf8ff')
+          .limit(10).get(),
+        firestore().collection('posts')
+          .orderBy('createdAt', 'desc')
+          .limit(20).get(),
+      ]);
 
-      const items: SearchResult[] = snapshot.docs.map(doc => {
-        const data = doc.data();
+      const foundUsers: User[] = uSnap.docs.map(d => {
+        const data = d.data();
         return {
-          id: doc.id,
-          displayName: data.displayName || '',
-          username: data.username || '',
-          profileImage: data.profileImage || null,
-          bio: data.bio || '',
-          isVerified: data.isVerified || false,
+          id: d.id, email: data.email || '', username: data.username || '',
+          displayName: data.displayName || '', bio: data.bio || '',
+          profileImage: data.profileImage || null, coverImage: data.coverImage || null,
+          role: data.role || '', badge: data.badge || '', subscription: data.subscription || '',
+          isVerified: data.isVerified || false, createdAt: tsToMillis(data.createdAt),
         };
       });
-      setResults(items);
-    } catch (err) {
-      console.error('Search failed:', err);
-    } finally {
-      setSearching(false);
-    }
-  };
 
-  const renderResult = ({ item }: { item: SearchResult }) => (
-    <TouchableOpacity
-      style={styles.resultItem}
-      onPress={() => navigation.navigate('ChatRoom', { userId: item.id })}
-    >
-      <View style={styles.avatar}>
-        {item.profileImage ? (
-          <Image source={{ uri: item.profileImage }} style={styles.avatarImg} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarText}>{item.displayName[0]?.toUpperCase()}</Text>
-          </View>
-        )}
-        {item.isVerified && (
-          <View style={styles.verifiedBadge}>
-            <Ionicons name="checkmark" size={8} color={colors.black} />
-          </View>
-        )}
-      </View>
-      <View style={styles.resultInfo}>
-        <Text style={styles.resultName}>{item.displayName}</Text>
-        <Text style={styles.resultUsername}>@{item.username}</Text>
-      </View>
-      <TouchableOpacity
-        style={styles.followBtn}
-        onPress={() => navigation.navigate('ChatRoom', { userId: item.id })}
-      >
-        <Text style={styles.followText}>Chat</Text>
-      </TouchableOpacity>
-    </TouchableOpacity>
-  );
+      const foundPosts: Post[] = pSnap.docs
+        .filter(d => d.data().caption?.toLowerCase().includes(lower))
+        .slice(0, 10)
+        .map(d => {
+          const data = d.data();
+          return {
+            id: d.id, authorId: data.authorId || '', authorUsername: data.authorUsername || '',
+            authorDisplayName: data.authorDisplayName || '', authorProfileImage: data.authorProfileImage || null,
+            authorBadge: data.authorBadge || '', authorIsVerified: data.authorIsVerified || false,
+            caption: data.caption || '', mediaUrls: parseMediaUrls(data.mediaUrls),
+            likeCount: data.likeCount || 0, commentCount: data.commentCount || 0,
+            repostCount: data.repostCount || 0, liked: false, bookmarked: false, reposted: false,
+            createdAt: tsToMillis(data.createdAt),
+          };
+        });
+
+      setUsers(foundUsers);
+      setPosts(foundPosts);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+    <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Search</Text>
+        <View style={{ width: 36 }} />
       </View>
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color={colors.textMuted} />
+      <View style={styles.searchBarWrap}>
+        <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
           style={styles.searchInput}
+          placeholder="Search"
+          placeholderTextColor={colors.textSecondary}
           value={query}
-          onChangeText={handleSearch}
-          placeholder="Search users..."
-          placeholderTextColor={colors.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
+          onChangeText={q => { setQuery(q); doSearch(q); }}
+          returnKeyType="search"
+          onSubmitEditing={() => doSearch(query)}
+          autoFocus
         />
         {query.length > 0 && (
-          <TouchableOpacity onPress={() => { setQuery(''); setResults([]); }}>
-            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+          <TouchableOpacity onPress={() => { setQuery(''); setUsers([]); setPosts([]); setSearched(false); }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 18, paddingHorizontal: 8 }}>✕</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      <FlatList
-        data={results}
-        keyExtractor={(item) => item.id}
-        renderItem={renderResult}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="search-outline" size={48} color={colors.textMuted} />
-            <Text style={styles.emptyText}>
-              {query.length > 0 ? 'No results found' : 'Search for users by username'}
-            </Text>
+      {loading && (
+        <View style={{ paddingTop: 40, alignItems: 'center' }}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      )}
+
+      {!searched && !loading && (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <Text style={{ fontSize: 28, color: colors.textSecondary }}>🔍</Text>
           </View>
-        }
-        showsVerticalScrollIndicator={false}
-      />
-    </SafeAreaView>
+          <Text style={styles.emptyTitle}>Search for people and posts</Text>
+          <Text style={styles.emptySubtitle}>Find users, posts, and topics across Black94.</Text>
+        </View>
+      )}
+
+      {searched && !loading && (
+        <FlatList
+          data={[...users.map(u => ({ type: 'user', data: u })), ...posts.map(p => ({ type: 'post', data: p }))]}
+          keyExtractor={(item, i) => `${item.type}-${i}`}
+          renderItem={({ item }) => {
+            if (item.type === 'user') {
+              const u = item.data as User;
+              return (
+                <TouchableOpacity style={styles.userRow}>
+                  <Avatar uri={u.profileImage} size={46} />
+                  <View style={{ marginLeft: 12, flex: 1 }}>
+                    <Text style={styles.displayName}>{u.displayName}</Text>
+                    <Text style={styles.handle}>@{u.username}</Text>
+                    {u.bio ? <Text style={styles.bio} numberOfLines={1}>{u.bio}</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            }
+            const p = item.data as Post;
+            return (
+              <View style={styles.postRow}>
+                <Avatar uri={p.authorProfileImage} size={38} />
+                <View style={{ marginLeft: 10, flex: 1 }}>
+                  <Text style={styles.displayName}>{p.authorDisplayName}
+                    <Text style={styles.handle}> @{p.authorUsername}</Text>
+                  </Text>
+                  <Text style={styles.caption} numberOfLines={2}>{p.caption}</Text>
+                </View>
+              </View>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', paddingTop: 60 }}>
+              <Text style={{ color: colors.textSecondary }}>No results for "{query}"</Text>
+            </View>
+          }
+          ItemSeparatorComponent={() => <View style={{ height: 0.5, backgroundColor: colors.border }} />}
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.bg },
   header: {
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10,
+    borderBottomWidth: 0.5, borderBottomColor: colors.border,
   },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: colors.white },
-  searchContainer: {
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  backArrow: { color: colors.text, fontSize: 22 },
+  headerTitle: { color: colors.text, fontSize: 18, fontWeight: '700' },
+  searchBarWrap: {
     flexDirection: 'row', alignItems: 'center',
-    margin: 12, backgroundColor: colors.surface,
-    borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, gap: 10,
+    backgroundColor: colors.bgInput, borderRadius: 25,
+    marginHorizontal: 16, marginVertical: 12, paddingHorizontal: 14,
   },
-  searchInput: { flex: 1, color: colors.text, fontSize: 15 },
-  list: { paddingBottom: 20 },
-  empty: { padding: 60, alignItems: 'center', gap: 12 },
-  emptyText: { color: colors.textMuted, fontSize: 15, textAlign: 'center' },
-  resultItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+  searchIcon: { fontSize: 16, marginRight: 8 },
+  searchInput: { flex: 1, color: colors.text, fontSize: 16, paddingVertical: 12 },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 100 },
+  emptyIcon: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: '#1a1a1a',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 20,
   },
-  avatar: { marginRight: 12, position: 'relative' },
-  avatarImg: { width: 46, height: 46, borderRadius: 23 },
-  avatarPlaceholder: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: colors.surfaceLight,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  avatarText: { color: colors.primary, fontWeight: 'bold', fontSize: 18 },
-  verifiedBadge: {
-    position: 'absolute', bottom: -1, right: -1,
-    backgroundColor: colors.verified, borderRadius: 10,
-    width: 16, height: 16, justifyContent: 'center', alignItems: 'center',
-  },
-  resultInfo: { flex: 1 },
-  resultName: { color: colors.white, fontWeight: '600', fontSize: 15 },
-  resultUsername: { color: colors.textMuted, fontSize: 13, marginTop: 1 },
-  followBtn: {
-    backgroundColor: colors.primary, borderRadius: 18,
-    paddingHorizontal: 16, paddingVertical: 6,
-  },
-  followText: { color: colors.black, fontWeight: '600', fontSize: 13 },
+  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  emptySubtitle: { color: colors.textSecondary, fontSize: 15, textAlign: 'center', paddingHorizontal: 40 },
+  userRow: { flexDirection: 'row', alignItems: 'flex-start', padding: 16 },
+  postRow: { flexDirection: 'row', alignItems: 'flex-start', padding: 16 },
+  displayName: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  handle: { color: colors.textSecondary, fontSize: 14 },
+  bio: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
+  caption: { color: colors.text, fontSize: 14, marginTop: 2, lineHeight: 20 },
 });

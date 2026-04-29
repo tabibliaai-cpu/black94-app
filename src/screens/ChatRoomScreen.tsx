@@ -1,194 +1,175 @@
-import React, { useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
-  KeyboardAvoidingView,
-  Platform,
+  View, Text, FlatList, TextInput, TouchableOpacity,
+  StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
-import { useAppStore } from '../stores/app';
 import { fetchMessages, sendMessage, Message } from '../lib/api';
-import { firestore, auth } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 
-type RouteParams = {
-  ChatRoom: {
-    chatId?: string;
-    userId?: string;
-  };
-};
+function Avatar({ uri, size = 36 }: { uri?: string | null; size?: number }) {
+  return uri ? (
+    <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+  ) : (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#333', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#fff', fontSize: size * 0.38, fontWeight: '700' }}>?</Text>
+    </View>
+  );
+}
 
-export default function ChatRoomScreen() {
-  const route = useRoute<RouteProp<RouteParams, 'ChatRoom'>>();
-  const navigation = useNavigation();
-  const params = route.params || {};
-  const { chatId: routeChatId, userId: targetUserId } = params;
-  const currentUser = useAppStore((s) => s.user);
-  const [messages, setMessages] = React.useState<Message[]>([]);
-  const [input, setInput] = React.useState('');
-  const [chatId, setChatId] = React.useState(routeChatId || '');
+export default function ChatRoomScreen({ route, navigation }: any) {
+  const { chat } = route.params;
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const flatRef = useRef<FlatList>(null);
+  const currentUser = auth()?.currentUser;
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const loadMessages = useCallback(async () => {
-    if (!chatId) return;
+  const load = useCallback(async (silent = false) => {
     try {
-      const msgs = await fetchMessages(chatId);
+      const msgs = await fetchMessages(chat.id);
       setMessages(msgs);
-    } catch (err) {
-      console.error('Failed to load messages:', err);
+      if (!silent) setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 100);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
     }
-  }, [chatId]);
+  }, [chat.id]);
 
-  const findOrCreateChat = useCallback(async () => {
-    const uid = auth().currentUser?.uid;
-    if (!uid || !targetUserId) return;
-
-    const snap1 = await firestore()
-      .collection('chats')
-      .where('user1Id', '==', uid)
-      .where('user2Id', '==', targetUserId)
-      .get();
-
-    if (!snap1.empty) {
-      setChatId(snap1.docs[0].id);
-      return;
-    }
-
-    const snap2 = await firestore()
-      .collection('chats')
-      .where('user1Id', '==', targetUserId)
-      .where('user2Id', '==', uid)
-      .get();
-
-    if (!snap2.empty) {
-      setChatId(snap2.docs[0].id);
-      return;
-    }
-
-    const docRef = await firestore().collection('chats').add({
-      user1Id: uid,
-      user2Id: targetUserId,
-      lastMessage: '',
-      lastMessageTime: firestore.FieldValue.serverTimestamp(),
-      unreadCount: 0,
-      createdAt: firestore.FieldValue.serverTimestamp(),
-      updatedAt: firestore.FieldValue.serverTimestamp(),
-    });
-    setChatId(docRef.id);
-  }, [targetUserId]);
-
-  React.useEffect(() => {
-    if (chatId) loadMessages();
-    else if (targetUserId) findOrCreateChat();
-  }, [chatId, targetUserId, loadMessages, findOrCreateChat]);
+  useEffect(() => {
+    load();
+    // Poll every 5s for new messages
+    pollRef.current = setInterval(() => load(true), 5000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   const handleSend = async () => {
-    if (!input.trim() || !chatId || !targetUserId) return;
+    if (!text.trim() || sending) return;
+    const content = text.trim();
+    setText('');
+    setSending(true);
+    // Optimistic update
+    const tempMsg: Message = {
+      id: `tmp-${Date.now()}`, chatId: chat.id,
+      senderId: currentUser?.uid || '', receiverId: chat.otherUser?.id || '',
+      content, createdAt: Date.now(),
+    };
+    setMessages(prev => [...prev, tempMsg]);
+    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
     try {
-      await sendMessage(chatId, targetUserId, input.trim());
-      setInput('');
-      loadMessages();
-    } catch (err) {
-      console.error('Send failed:', err);
+      await sendMessage(chat.id, chat.otherUser?.id || '', content);
+      await load(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSending(false);
     }
   };
 
   const renderMessage = ({ item }: { item: Message }) => {
-    const isMine = item.senderId === currentUser?.id;
+    const isMine = item.senderId === currentUser?.uid;
     return (
-      <View style={[styles.msgRow, isMine ? styles.msgRowMine : styles.msgRowOther]}>
-        <View style={[styles.msgBubble, isMine ? styles.msgBubbleMine : styles.msgBubbleOther]}>
-          <Text style={[styles.msgText, isMine ? styles.msgTextMine : styles.msgTextOther]}>
-            {item.content}
-          </Text>
+      <View style={[styles.msgRow, isMine ? styles.msgRowRight : styles.msgRowLeft]}>
+        {!isMine && <Avatar uri={chat.otherUser?.profileImage} size={28} />}
+        <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs]}>
+          <Text style={[styles.bubbleText, isMine && { color: '#fff' }]}>{item.content}</Text>
         </View>
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Chat</Text>
-        <View style={{ width: 22 }} />
+        <Avatar uri={chat.otherUser?.profileImage} size={36} />
+        <View style={{ marginLeft: 10, flex: 1 }}>
+          <Text style={styles.headerName} numberOfLines={1}>
+            {chat.otherUser?.displayName || chat.otherUser?.username || 'Chat'}
+          </Text>
+          <Text style={styles.headerHandle}>@{chat.otherUser?.username}</Text>
+        </View>
       </View>
 
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        style={styles.messageList}
-        contentContainerStyle={styles.messageListContent}
-        inverted={false}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      ) : (
+        <FlatList
+          ref={flatRef}
+          data={messages}
+          keyExtractor={item => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={{ padding: 16, gap: 8 }}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', paddingTop: 80 }}>
+              <Text style={{ color: colors.textSecondary }}>No messages yet. Say hi! 👋</Text>
+            </View>
+          }
+        />
+      )}
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.inputContainer}
-      >
+      {/* Input */}
+      <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
-          value={input}
-          onChangeText={setInput}
           placeholder="Type a message..."
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.textSecondary}
+          value={text}
+          onChangeText={setText}
           multiline
         />
         <TouchableOpacity
-          style={[styles.sendBtn, !input.trim() && { opacity: 0.5 }]}
+          style={[styles.sendBtn, !text.trim() && { opacity: 0.4 }]}
           onPress={handleSend}
-          disabled={!input.trim()}
+          disabled={!text.trim() || sending}
         >
-          <Ionicons name="send" size={20} color={colors.black} />
+          {sending
+            ? <ActivityIndicator color="#fff" size="small" />
+            : <Text style={styles.sendIcon}>↑</Text>}
         </TouchableOpacity>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.bg },
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10,
+    borderBottomWidth: 0.5, borderBottomColor: colors.border,
   },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: colors.white },
-  messageList: { flex: 1 },
-  messageListContent: { padding: 16, gap: 6 },
-  msgRow: { flexDirection: 'row' },
-  msgRowMine: { justifyContent: 'flex-end' },
-  msgRowOther: { justifyContent: 'flex-start' },
-  msgBubble: { maxWidth: '75%', borderRadius: 18, paddingVertical: 10, paddingHorizontal: 14 },
-  msgBubbleMine: { backgroundColor: colors.primary, borderBottomRightRadius: 4 },
-  msgBubbleOther: { backgroundColor: colors.surfaceLight, borderBottomLeftRadius: 4 },
-  msgText: { fontSize: 15, lineHeight: 20 },
-  msgTextMine: { color: colors.black },
-  msgTextOther: { color: colors.text },
-  inputContainer: {
-    flexDirection: 'row', alignItems: 'flex-end',
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: colors.border,
-    gap: 8,
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginRight: 6 },
+  backArrow: { color: colors.text, fontSize: 22 },
+  headerName: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  headerHandle: { color: colors.textSecondary, fontSize: 13 },
+  msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginVertical: 3 },
+  msgRowRight: { justifyContent: 'flex-end' },
+  msgRowLeft: { justifyContent: 'flex-start' },
+  bubble: { maxWidth: '75%', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18 },
+  bubbleMine: { backgroundColor: colors.accent, borderBottomRightRadius: 4 },
+  bubbleTheirs: { backgroundColor: '#1e1e1e', borderBottomLeftRadius: 4 },
+  bubbleText: { color: colors.text, fontSize: 15, lineHeight: 21 },
+  inputRow: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 10,
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderTopWidth: 0.5, borderTopColor: colors.border,
   },
   input: {
-    flex: 1, backgroundColor: colors.surface,
-    borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10,
-    color: colors.text, fontSize: 15, maxHeight: 100,
+    flex: 1, backgroundColor: colors.bgInput, borderRadius: 22,
+    paddingHorizontal: 16, paddingVertical: 10, color: colors.text, fontSize: 15, maxHeight: 100,
   },
   sendBtn: {
-    backgroundColor: colors.primary, width: 40, height: 40,
-    borderRadius: 20, justifyContent: 'center', alignItems: 'center',
+    width: 42, height: 42, borderRadius: 21, backgroundColor: colors.accent,
+    alignItems: 'center', justifyContent: 'center',
   },
+  sendIcon: { color: '#fff', fontSize: 18, fontWeight: '700' },
 });

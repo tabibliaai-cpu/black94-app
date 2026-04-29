@@ -1,234 +1,247 @@
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  ScrollView,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
+  View, Text, Image, TouchableOpacity, FlatList,
+  StyleSheet, Dimensions, ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
-import { useAppStore } from '../stores/app';
-import { fetchUserProfile, checkFollowing, toggleFollow, Post, tsToMillis, parseMediaUrls } from '../lib/api';
-import { firestore, auth } from '../lib/firebase';
+import { fetchUserProfile, fetchFeed, toggleFollow, checkFollowing, Post, User } from '../lib/api';
+import { auth, firestore } from '../lib/firebase';
+import { tsToMillis, parseMediaUrls } from '../lib/api';
 
-export default function ProfileScreen() {
-  const navigation = useNavigation<any>();
-  const { user } = useAppStore();
-  const [posts, setPosts] = React.useState<Post[]>([]);
-  const [followerCount, setFollowerCount] = React.useState(0);
-  const [followingCount, setFollowingCount] = React.useState(0);
+const { width: SCREEN_W } = Dimensions.get('window');
 
-  React.useEffect(() => {
-    if (user?.id) loadData();
-  }, [user?.id]);
+function Avatar({ uri, size = 72 }: { uri?: string | null; size?: number }) {
+  return uri ? (
+    <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 3, borderColor: colors.bg, backgroundColor: '#222' }} />
+  ) : (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#333', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: colors.bg }}>
+      <Text style={{ color: '#fff', fontSize: size * 0.38, fontWeight: '700' }}>?</Text>
+    </View>
+  );
+}
 
-  const loadData = async () => {
-    if (!user?.id) return;
+function PostGrid({ posts, onPress }: { posts: Post[]; onPress: (p: Post) => void }) {
+  if (posts.length === 0) return (
+    <View style={{ alignItems: 'center', paddingTop: 60 }}>
+      <Text style={{ color: colors.textSecondary, fontSize: 15 }}>No posts yet</Text>
+    </View>
+  );
+  return (
+    <View style={{ paddingHorizontal: 16 }}>
+      {posts.map(post => (
+        <TouchableOpacity key={post.id} style={styles.postRow} onPress={() => onPress(post)}>
+          <View style={styles.postRowInner}>
+            <Text style={styles.postCaption} numberOfLines={3}>{post.caption}</Text>
+            {post.mediaUrls?.length > 0 && (
+              <Image source={{ uri: post.mediaUrls[0] }} style={styles.postThumb} />
+            )}
+          </View>
+          <View style={styles.postStats}>
+            <Text style={styles.postStat}>🤍 {post.likeCount}</Text>
+            <Text style={styles.postStat}>💬 {post.commentCount}</Text>
+            <Text style={styles.postStat}>🔁 {post.repostCount}</Text>
+          </View>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+export default function ProfileScreen({ route, navigation }: any) {
+  const currentUser = auth()?.currentUser;
+  const targetUserId = route?.params?.userId || currentUser?.uid;
+  const isOwnProfile = targetUserId === currentUser?.uid;
+
+  const [user, setUser] = useState<User | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [tab, setTab] = useState<'posts' | 'store' | 'likes'>('posts');
+
+  const load = useCallback(async () => {
     try {
-      // Fetch user's posts
-      const snapshot = await firestore()
-        .collection('posts')
-        .where('authorId', '==', user.id)
-        .limit(20)
-        .get();
-
-      const list: Post[] = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-        id: doc.id,
-        authorId: data.authorId || '',
-        authorUsername: data.authorUsername || '',
-        authorDisplayName: data.authorDisplayName || '',
-        authorProfileImage: data.authorProfileImage || null,
-        authorBadge: data.authorBadge || '',
-        authorIsVerified: data.authorIsVerified || false,
-        caption: data.caption || '',
-        mediaUrls: parseMediaUrls(data.mediaUrls),
-        likeCount: data.likeCount || 0,
-        commentCount: data.commentCount || 0,
-        repostCount: data.repostCount || 0,
-        liked: false,
-        bookmarked: false,
-        reposted: false,
-        createdAt: tsToMillis(data.createdAt),
-        };
-      }).sort(
-        (a, b) => b.createdAt - a.createdAt
-      );
-      setPosts(list);
-
-      // Count followers/following
-      const followersSnap = await firestore()
-        .collection('follows')
-        .where('followingId', '==', user.id)
-        .limit(100)
-        .get();
-      setFollowerCount(followersSnap.size);
-
-      const followingSnap = await firestore()
-        .collection('follows')
-        .where('followerId', '==', user.id)
-        .limit(100)
-        .get();
+      const [u, feed, isFollowing, followersSnap, followingSnap] = await Promise.all([
+        fetchUserProfile(targetUserId),
+        firestore().collection('posts').where('authorId', '==', targetUserId).orderBy('createdAt', 'desc').limit(20).get(),
+        isOwnProfile ? Promise.resolve(false) : checkFollowing(targetUserId),
+        firestore().collection('follows').where('followingId', '==', targetUserId).get(),
+        firestore().collection('follows').where('followerId', '==', targetUserId).get(),
+      ]);
+      setUser(u);
+      setFollowing(isFollowing);
+      setFollowersCount(followersSnap.size);
       setFollowingCount(followingSnap.size);
-    } catch (err) {
-      console.error('Failed to load profile data:', err);
+
+      const ps: Post[] = feed.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id, authorId: data.authorId || '', authorUsername: data.authorUsername || '',
+          authorDisplayName: data.authorDisplayName || '', authorProfileImage: data.authorProfileImage || null,
+          authorBadge: data.authorBadge || '', authorIsVerified: data.authorIsVerified || false,
+          caption: data.caption || '', mediaUrls: parseMediaUrls(data.mediaUrls),
+          likeCount: data.likeCount || 0, commentCount: data.commentCount || 0,
+          repostCount: data.repostCount || 0, liked: false, bookmarked: false, reposted: false,
+          createdAt: tsToMillis(data.createdAt),
+        };
+      });
+      setPosts(ps);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
+  }, [targetUserId]);
+
+  useEffect(() => { load(); }, []);
+
+  const handleFollow = async () => {
+    const newState = await toggleFollow(targetUserId, following);
+    setFollowing(newState);
+    setFollowersCount(c => c + (newState ? 1 : -1));
   };
 
-  const handleLogout = async () => {
-    const { signOutUser } = await import('../lib/api');
-    try {
-      await signOutUser();
-      useAppStore.getState().setUser(null);
-      useAppStore.getState().setToken(null);
-    } catch (err) {
-      console.error('Logout failed:', err);
-    }
-  };
+  if (loading) return (
+    <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <ActivityIndicator color={colors.accent} size="large" />
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
+    <ScrollView
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.accent} />}
+    >
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => navigation.openDrawer()}>
+          <Text style={{ color: colors.text, fontSize: 24 }}>☰</Text>
+        </TouchableOpacity>
+        <Image source={require('../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
         <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
-          <Ionicons name="settings-outline" size={22} color={colors.text} />
+          <Text style={{ color: colors.text, fontSize: 20 }}>⚙️</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Profile Info */}
-        <View style={styles.profileSection}>
-          <View style={styles.avatarContainer}>
-            {user?.profileImage ? (
-              <Image source={{ uri: user.profileImage }} style={styles.profileImage} />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarText}>{user?.displayName?.[0]?.toUpperCase()}</Text>
-              </View>
-            )}
-            {user?.isVerified && (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark" size={12} color={colors.black} />
-              </View>
-            )}
+      {/* Cover */}
+      <View style={styles.coverWrap}>
+        {user?.coverImage ? (
+          <Image source={{ uri: user.coverImage }} style={styles.cover} resizeMode="cover" />
+        ) : (
+          <View style={[styles.cover, { backgroundColor: '#111' }]}>
+            <Image source={require('../../assets/logo.png')} style={{ width: '80%', height: '80%', opacity: 0.15 }} resizeMode="contain" />
           </View>
-          <Text style={styles.displayName}>{user?.displayName || 'User'}</Text>
-          <Text style={styles.username}>@{user?.username || 'user'}</Text>
-          {user?.bio ? <Text style={styles.bio}>{user.bio}</Text> : null}
+        )}
+      </View>
 
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>{posts.length}</Text>
-              <Text style={styles.statLabel}>Posts</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>{followerCount}</Text>
-              <Text style={styles.statLabel}>Followers</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>{followingCount}</Text>
-              <Text style={styles.statLabel}>Following</Text>
-            </View>
-          </View>
-
-          {/* Logout Button */}
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={18} color={colors.error} />
-            <Text style={styles.logoutText}>Log Out</Text>
-          </TouchableOpacity>
+      {/* Avatar + Edit / Follow */}
+      <View style={styles.avatarRow}>
+        <View style={{ marginTop: -40 }}>
+          <Avatar uri={user?.profileImage || currentUser?.photoURL} size={80} />
         </View>
+        {isOwnProfile ? (
+          <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('EditProfile')}>
+            <Text style={styles.editBtnText}>Edit profile</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.editBtn, following && styles.followingBtn]}
+            onPress={handleFollow}
+          >
+            <Text style={[styles.editBtnText, following && { color: colors.text }]}>
+              {following ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
-        {/* Posts Grid */}
-        <View style={styles.postsSection}>
-          <Text style={styles.sectionTitle}>Posts</Text>
-          {posts.length > 0 ? (
-            <View style={styles.postsGrid}>
-              {posts.map((post) => (
-                <View key={post.id} style={styles.gridItem}>
-                  {post.mediaUrls.length > 0 ? (
-                    <Image source={{ uri: post.mediaUrls[0] }} style={styles.gridImage} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.gridTextItem}>
-                      <Text style={styles.gridText} numberOfLines={4}>{post.caption}</Text>
-                    </View>
-                  )}
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.emptyPosts}>
-              <Text style={styles.emptyText}>No posts yet</Text>
+      {/* Name / Bio */}
+      <View style={styles.bioSection}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={styles.displayName}>{user?.displayName || 'User'}</Text>
+          {user?.isVerified && (
+            <View style={styles.verifiedBadge}>
+              <Text style={{ color: colors.verified, fontSize: 12, fontWeight: '900' }}>✓</Text>
             </View>
           )}
         </View>
-      </ScrollView>
-    </SafeAreaView>
+        <Text style={styles.handle}>@{user?.username}</Text>
+        {user?.bio ? <Text style={styles.bio}>{user.bio}</Text> : null}
+        <View style={styles.statsRow}>
+          <TouchableOpacity>
+            <Text style={styles.statText}><Text style={styles.statNum}>{followingCount}</Text> Following</Text>
+          </TouchableOpacity>
+          <TouchableOpacity>
+            <Text style={styles.statText}><Text style={styles.statNum}>{followersCount}</Text> Followers</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Tabs */}
+      <View style={styles.tabs}>
+        {(['posts', 'store', 'likes'] as const).map(t => (
+          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
+            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {tab === 'posts' && <PostGrid posts={posts} onPress={() => {}} />}
+      {tab === 'store' && (
+        <View style={{ alignItems: 'center', paddingTop: 60 }}>
+          <Text style={{ color: colors.textSecondary }}>No store items yet</Text>
+        </View>
+      )}
+      {tab === 'likes' && (
+        <View style={{ alignItems: 'center', paddingTop: 60 }}>
+          <Text style={{ color: colors.textSecondary }}>No liked posts yet</Text>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+  container: { flex: 1, backgroundColor: colors.bg },
+  topBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10,
   },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: colors.white },
-  profileSection: { alignItems: 'center', paddingVertical: 24, paddingHorizontal: 16 },
-  avatarContainer: { position: 'relative', marginBottom: 12 },
-  profileImage: { width: 80, height: 80, borderRadius: 40 },
-  avatarPlaceholder: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: colors.surfaceLight,
-    justifyContent: 'center', alignItems: 'center',
+  logo: { height: 28, width: 90 },
+  coverWrap: { height: 140, width: '100%', overflow: 'hidden', backgroundColor: '#111' },
+  cover: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  avatarRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: -4 },
+  editBtn: {
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: 20,
+    paddingHorizontal: 18, paddingVertical: 8, marginBottom: 6,
   },
-  avatarText: { color: colors.primary, fontWeight: 'bold', fontSize: 32 },
+  followingBtn: { backgroundColor: '#1a1a1a' },
+  editBtnText: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  bioSection: { paddingHorizontal: 16, paddingTop: 10 },
+  displayName: { color: colors.text, fontSize: 20, fontWeight: '800' },
   verifiedBadge: {
-    position: 'absolute', bottom: 2, right: 2,
-    backgroundColor: colors.verified, borderRadius: 12,
-    width: 22, height: 22, justifyContent: 'center', alignItems: 'center',
-    borderWidth: 2, borderColor: colors.background,
+    width: 18, height: 18, borderRadius: 9, backgroundColor: colors.verified,
+    alignItems: 'center', justifyContent: 'center',
   },
-  displayName: { color: colors.white, fontSize: 20, fontWeight: 'bold' },
-  username: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
-  bio: { color: colors.textSecondary, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
-  statsRow: {
-    flexDirection: 'row', gap: 32, marginTop: 20,
-    paddingVertical: 12,
-  },
-  stat: { alignItems: 'center' },
-  statNumber: { color: colors.white, fontWeight: 'bold', fontSize: 17 },
-  statLabel: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  logoutBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginTop: 16, paddingVertical: 10, paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.2)',
-  },
-  logoutText: { color: colors.error, fontSize: 15, fontWeight: '600' },
-  postsSection: { paddingHorizontal: 16, paddingBottom: 40 },
-  sectionTitle: { color: colors.white, fontWeight: '600', fontSize: 16, marginBottom: 12 },
-  postsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
-  gridItem: { width: '33%', aspectRatio: 1 },
-  gridImage: { width: '100%', height: '100%' },
-  gridTextItem: {
-    backgroundColor: colors.surface,
-    width: '100%', height: '100%',
-    padding: 6, justifyContent: 'center',
-  },
-  gridText: { color: colors.textSecondary, fontSize: 11, lineHeight: 14 },
-  emptyPosts: { padding: 40, alignItems: 'center' },
-  emptyText: { color: colors.textMuted, fontSize: 14 },
+  handle: { color: colors.textSecondary, fontSize: 15, marginTop: 2 },
+  bio: { color: colors.text, fontSize: 15, lineHeight: 22, marginTop: 8 },
+  statsRow: { flexDirection: 'row', gap: 20, marginTop: 10 },
+  statText: { color: colors.textSecondary, fontSize: 14 },
+  statNum: { color: colors.text, fontWeight: '700' },
+  tabs: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: colors.border, marginTop: 14 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 14 },
+  tabActive: { borderBottomWidth: 2, borderBottomColor: colors.text },
+  tabText: { color: colors.textSecondary, fontWeight: '600', fontSize: 15 },
+  tabTextActive: { color: colors.text },
+  postRow: { paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: colors.border },
+  postRowInner: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  postCaption: { color: colors.text, fontSize: 14, flex: 1, lineHeight: 20 },
+  postThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: '#1a1a1a' },
+  postStats: { flexDirection: 'row', gap: 16, marginTop: 8 },
+  postStat: { color: colors.textSecondary, fontSize: 13 },
 });

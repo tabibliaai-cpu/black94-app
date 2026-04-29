@@ -1,31 +1,55 @@
-import React, { useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  StyleSheet,
-  RefreshControl,
-  SafeAreaView,
-  StatusBar,
-  TextInput,
+  View, Text, FlatList, Image, TouchableOpacity,
+  StyleSheet, RefreshControl, TextInput, Modal,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
+  Alert, Dimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
-import { useAppStore } from '../stores/app';
-import { fetchFeed, toggleLike, toggleBookmark, createPost, Post } from '../lib/api';
+import { fetchFeed, createPost, toggleLike, toggleBookmark, Post } from '../lib/api';
+import { auth } from '../lib/firebase';
 
-function timeAgo(timestamp: number): string {
-  const diff = Date.now() - timestamp;
+const { width: SCREEN_W } = Dimensions.get('window');
+
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'now';
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  return `${days}d`;
+  if (days < 30) return `${days}d`;
+  const months = Math.floor(days / 30);
+  return `${months}mo`;
+}
+
+function Avatar({ uri, size = 44 }: { uri?: string | null; size?: number }) {
+  return uri ? (
+    <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#222' }} />
+  ) : (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#333', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#fff', fontSize: size * 0.4, fontWeight: '700' }}>?</Text>
+    </View>
+  );
+}
+
+function VerifiedBadge({ badge }: { badge?: string }) {
+  if (!badge && badge !== 'gold') return (
+    <View style={styles.badge}>
+      <Text style={{ color: colors.verified, fontSize: 10, fontWeight: '900' }}>✓</Text>
+    </View>
+  );
+  if (badge === 'gold') return (
+    <View style={[styles.badge, { backgroundColor: colors.verifiedGold }]}>
+      <Text style={{ color: '#000', fontSize: 10, fontWeight: '900' }}>✓</Text>
+    </View>
+  );
+  return (
+    <View style={styles.badge}>
+      <Text style={{ color: colors.verified, fontSize: 10, fontWeight: '900' }}>✓</Text>
+    </View>
+  );
 }
 
 function PostCard({ post, onLike, onBookmark }: {
@@ -33,351 +57,239 @@ function PostCard({ post, onLike, onBookmark }: {
   onLike: (id: string, liked: boolean) => void;
   onBookmark: (id: string, bookmarked: boolean) => void;
 }) {
-  const navigation = useNavigation<any>();
-  const user = useAppStore((s) => s.user);
-
   return (
     <View style={styles.postCard}>
-      {/* Header */}
-      <TouchableOpacity
-        style={styles.postHeader}
-        onPress={() => user && post.authorId !== user.id && navigation.navigate('ChatRoom', { userId: post.authorId })}
-      >
-        <View style={styles.avatar}>
-          {post.authorProfileImage ? (
-            <Image source={{ uri: post.authorProfileImage }} style={styles.avatarImg} />
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarText}>{post.authorDisplayName[0]?.toUpperCase()}</Text>
-            </View>
-          )}
-          {post.authorIsVerified && (
-            <View style={styles.verifiedBadge}>
-              <Ionicons name="checkmark" size={8} color={colors.black} />
-            </View>
-          )}
+      <View style={styles.postHeader}>
+        <Avatar uri={post.authorProfileImage} size={44} />
+        <View style={styles.postMeta}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text style={styles.displayName}>{post.authorDisplayName}</Text>
+            <VerifiedBadge badge={post.authorBadge} />
+            <Text style={styles.handle}>@{post.authorUsername}</Text>
+            <Text style={styles.dot}>·</Text>
+            <Text style={styles.time}>{timeAgo(post.createdAt)}</Text>
+          </View>
         </View>
-        <View style={styles.headerInfo}>
-          <Text style={styles.authorName}>{post.authorDisplayName}</Text>
-          <Text style={styles.authorUsername}>@{post.authorUsername} · {timeAgo(post.createdAt)}</Text>
+        <TouchableOpacity style={styles.moreBtn}>
+          <Text style={styles.moreText}>⋮</Text>
+        </TouchableOpacity>
+      </View>
+
+      {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}
+
+      {post.mediaUrls?.length > 0 && (
+        <View style={styles.mediaContainer}>
+          <Image
+            source={{ uri: post.mediaUrls[0] }}
+            style={styles.media}
+            resizeMode="cover"
+          />
         </View>
-      </TouchableOpacity>
-
-      {/* Caption */}
-      {post.caption ? (
-        <Text style={styles.caption}>{post.caption}</Text>
-      ) : null}
-
-      {/* Media */}
-      {post.mediaUrls.length > 0 && (
-        <Image
-          source={{ uri: post.mediaUrls[0] }}
-          style={styles.postImage}
-          resizeMode="cover"
-        />
       )}
 
-      {/* Actions */}
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={() => onLike(post.id, post.liked)}
-        >
-          <Ionicons
-            name={post.liked ? 'heart' : 'heart-outline'}
-            size={20}
-            color={post.liked ? colors.likeRed : colors.textSecondary}
-          />
-          <Text style={[styles.actionText, post.liked && { color: colors.likeRed }]}>
-            {post.likeCount || ''}
+        <ActionBtn icon="💬" count={post.commentCount} />
+        <ActionBtn icon="🔁" count={post.repostCount} active={post.reposted} activeColor={colors.accentGreen} />
+        <TouchableOpacity style={styles.actionBtn} onPress={() => onLike(post.id, post.liked)}>
+          <Text style={{ fontSize: 16, color: post.liked ? colors.accentRed : colors.textSecondary }}>
+            {post.liked ? '❤️' : '🤍'}
+          </Text>
+          {post.likeCount > 0 && (
+            <Text style={[styles.actionCount, post.liked && { color: colors.accentRed }]}>{post.likeCount}</Text>
+          )}
+        </TouchableOpacity>
+        <ActionBtn icon="📈" />
+        <TouchableOpacity style={styles.actionBtn} onPress={() => onBookmark(post.id, post.bookmarked)}>
+          <Text style={{ fontSize: 16, color: post.bookmarked ? colors.accent : colors.textSecondary }}>
+            {post.bookmarked ? '🔖' : '🏷️'}
           </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionBtn}>
-          <Ionicons name="chatbubble-outline" size={20} color={colors.textSecondary} />
-          <Text style={styles.actionText}>{post.commentCount || ''}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionBtn}>
-          <Ionicons name="repeat" size={20} color={colors.textSecondary} />
-          <Text style={styles.actionText}>{post.repostCount || ''}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionBtn, { marginLeft: 'auto' }]}
-          onPress={() => onBookmark(post.id, post.bookmarked)}
-        >
-          <Ionicons
-            name={post.bookmarked ? 'bookmark' : 'bookmark-outline'}
-            size={20}
-            color={post.bookmarked ? colors.primary : colors.textSecondary}
-          />
-        </TouchableOpacity>
+        <ActionBtn icon="↑" />
       </View>
     </View>
   );
 }
 
-export default function FeedScreen() {
-  const [posts, setPosts] = React.useState<Post[]>([]);
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [composing, setComposing] = React.useState(false);
-  const [caption, setCaption] = React.useState('');
+function ActionBtn({ icon, count, active, activeColor }: {
+  icon: string; count?: number; active?: boolean; activeColor?: string;
+}) {
+  return (
+    <TouchableOpacity style={styles.actionBtn}>
+      <Text style={{ fontSize: 16, color: active ? activeColor : colors.textSecondary }}>{icon}</Text>
+      {count !== undefined && count > 0 && (
+        <Text style={[styles.actionCount, active && { color: activeColor }]}>{count}</Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+export default function FeedScreen({ navigation }: any) {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [composeVisible, setComposeVisible] = useState(false);
+  const [composeText, setComposeText] = useState('');
+  const [posting, setPosting] = useState(false);
+  const currentUser = auth()?.currentUser;
 
   const loadFeed = useCallback(async () => {
     try {
-      const feed = await fetchFeed(20);
-      setPosts(feed);
-    } catch (err) {
-      console.error('Failed to load feed:', err);
+      const data = await fetchFeed(30);
+      setPosts(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  React.useEffect(() => {
-    loadFeed();
-  }, [loadFeed]);
+  useEffect(() => { loadFeed(); }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadFeed();
-    setRefreshing(false);
+  const handleLike = async (postId: string, liked: boolean) => {
+    setPosts(prev => prev.map(p => p.id === postId
+      ? { ...p, liked: !liked, likeCount: p.likeCount + (liked ? -1 : 1) }
+      : p));
+    await toggleLike(postId, liked);
   };
 
-  const handleLike = async (postId: string, currentlyLiked: boolean) => {
-    try {
-      const liked = await toggleLike(postId, currentlyLiked);
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, liked, likeCount: p.likeCount + (liked ? 1 : -1) } : p));
-    } catch (err) {
-      console.error('Like failed:', err);
-    }
-  };
-
-  const handleBookmark = async (postId: string, currentlyBookmarked: boolean) => {
-    try {
-      const bookmarked = await toggleBookmark(postId, currentlyBookmarked);
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, bookmarked } : p));
-    } catch (err) {
-      console.error('Bookmark failed:', err);
-    }
+  const handleBookmark = async (postId: string, bookmarked: boolean) => {
+    setPosts(prev => prev.map(p => p.id === postId ? { ...p, bookmarked: !bookmarked } : p));
+    await toggleBookmark(postId, bookmarked);
   };
 
   const handlePost = async () => {
-    if (!caption.trim()) return;
+    if (!composeText.trim()) return;
+    setPosting(true);
     try {
-      await createPost(caption.trim());
-      setCaption('');
-      setComposing(false);
+      await createPost(composeText.trim());
+      setComposeText('');
+      setComposeVisible(false);
       loadFeed();
-    } catch (err) {
-      console.error('Post failed:', err);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to post');
+    } finally {
+      setPosting(false);
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={colors.accent} size="large" />
+      </View>
+    );
+  }
 
-      {/* Header */}
+  return (
+    <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Black94</Text>
-        <TouchableOpacity onPress={() => setComposing(!composing)}>
-          <Ionicons name="create" size={22} color={colors.primary} />
+        <TouchableOpacity onPress={() => navigation.openDrawer()}>
+          <Avatar uri={currentUser?.photoURL} size={34} />
         </TouchableOpacity>
+        <Text style={styles.logo}>Black94</Text>
+        <View style={{ width: 34 }} />
       </View>
 
-      {/* Compose bar */}
-      {composing && (
-        <View style={styles.composeBar}>
-          <View style={styles.composeInput}>
-            <TextInput
-              style={styles.composeText}
-              placeholder="What's on your mind?"
-              placeholderTextColor={colors.textMuted}
-              multiline
-              value={caption}
-              onChangeText={setCaption}
-            />
-          </View>
-          <TouchableOpacity
-            style={[styles.composeBtn, !caption.trim() && { opacity: 0.5 }]}
-            onPress={handlePost}
-            disabled={!caption.trim()}
-          >
-            <Text style={styles.composeBtnText}>Post</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Feed */}
       <FlatList
         data={posts}
-        keyExtractor={(item) => item.id}
+        keyExtractor={item => item.id}
         renderItem={({ item }) => (
           <PostCard post={item} onLike={handleLike} onBookmark={handleBookmark} />
         )}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.primary}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadFeed(); }} tintColor={colors.accent} />
         }
-        contentContainerStyle={styles.feedList}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No posts yet. Be the first to post!</Text>
+          <View style={{ alignItems: 'center', paddingTop: 80 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 16 }}>No posts yet</Text>
           </View>
         }
-        showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+
+      <TouchableOpacity style={styles.fab} onPress={() => setComposeVisible(true)}>
+        <Text style={styles.fabText}>✏️</Text>
+      </TouchableOpacity>
+
+      <Modal visible={composeVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.composeSheet}>
+            <View style={styles.composeHeader}>
+              <TouchableOpacity onPress={() => setComposeVisible(false)}>
+                <Text style={{ color: colors.text, fontSize: 16 }}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 16 }}>New Post</Text>
+              <TouchableOpacity
+                style={[styles.postBtn, !composeText.trim() && { opacity: 0.4 }]}
+                onPress={handlePost}
+                disabled={posting || !composeText.trim()}
+              >
+                {posting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.postBtnText}>Post</Text>}
+              </TouchableOpacity>
+            </View>
+            <View style={styles.composeBody}>
+              <Avatar uri={currentUser?.photoURL} size={40} />
+              <TextInput
+                style={styles.composeInput}
+                placeholder="What's happening?"
+                placeholderTextColor={colors.textSecondary}
+                value={composeText}
+                onChangeText={setComposeText}
+                multiline
+                autoFocus
+              />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1, backgroundColor: colors.bg },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10,
+    borderBottomWidth: 0.5, borderBottomColor: colors.border,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.white,
+  logo: { color: colors.text, fontSize: 18, fontWeight: '800' },
+  postCard: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.bg },
+  postHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 6 },
+  postMeta: { flex: 1, marginLeft: 10 },
+  displayName: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  handle: { color: colors.textSecondary, fontSize: 14 },
+  dot: { color: colors.textSecondary, fontSize: 14 },
+  time: { color: colors.textSecondary, fontSize: 14 },
+  badge: {
+    width: 16, height: 16, borderRadius: 8, backgroundColor: colors.verified,
+    alignItems: 'center', justifyContent: 'center',
   },
-  composeBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  moreBtn: { padding: 4 },
+  moreText: { color: colors.textSecondary, fontSize: 20 },
+  caption: { color: colors.text, fontSize: 15, lineHeight: 22, marginBottom: 10, marginLeft: 54 },
+  mediaContainer: { marginLeft: 54, borderRadius: 14, overflow: 'hidden', marginBottom: 4 },
+  media: { width: '100%', height: 260, backgroundColor: '#111' },
+  actions: { flexDirection: 'row', alignItems: 'center', marginTop: 10, marginLeft: 54, gap: 28 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  actionCount: { color: colors.textSecondary, fontSize: 13 },
+  separator: { height: 0.5, backgroundColor: colors.border },
+  fab: {
+    position: 'absolute', bottom: 20, right: 20,
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center',
+    elevation: 6,
   },
-  composeInput: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    justifyContent: 'center',
-    minHeight: 40,
+  fabText: { fontSize: 22 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  composeSheet: {
+    backgroundColor: colors.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 16, minHeight: 200,
   },
-  composeText: {
-    color: colors.text,
-    fontSize: 15,
-  },
-  composeBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    justifyContent: 'center',
-  },
-  composeBtnText: {
-    color: colors.black,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  feedList: {
-    paddingBottom: 20,
-  },
-  empty: {
-    padding: 60,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 15,
-  },
-  postCard: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  postHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  avatar: {
-    marginRight: 10,
-    position: 'relative',
-  },
-  avatarImg: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-  },
-  avatarPlaceholder: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: colors.surfaceLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    color: colors.primary,
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  verifiedBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: colors.verified,
-    borderRadius: 10,
-    width: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  authorName: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  authorUsername: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 1,
-  },
-  caption: {
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  postImage: {
-    width: '100%',
-    height: 220,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  actions: {
-    flexDirection: 'row',
-    marginTop: 4,
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 20,
-    gap: 4,
-  },
-  actionText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-  },
+  composeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  composeBody: { flexDirection: 'row', gap: 12 },
+  composeInput: { flex: 1, color: colors.text, fontSize: 16, minHeight: 80 },
+  postBtn: { backgroundColor: colors.accent, paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20 },
+  postBtnText: { color: '#fff', fontWeight: '700' },
 });

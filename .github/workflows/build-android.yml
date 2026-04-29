@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK + AAB
 
 on:
   push:
@@ -14,9 +14,9 @@ env:
 
 jobs:
   build-android:
-    name: Build Release APK
+    name: Build Release APK + AAB
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -79,14 +79,22 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --console=plain
 
-      - name: Upload APK to Release
+      - name: Build Release AAB
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: cd android && ./gradlew bundleRelease --no-daemon --console=plain
+
+      - name: Upload APK + AAB to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p artifacts
           cp android/app/build/outputs/apk/release/app-release.apk artifacts/black94-release.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab artifacts/black94-release.aab
           ls -lh artifacts/
-          
+
           VERSION=$(node -p "require('./package.json').version")
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -94,8 +102,9 @@ jobs:
 
           gh release create "$TAG" \
             artifacts/black94-release.apk \
+            artifacts/black94-release.aab \
             --title "Black94 Build #${{ github.run_number }}" \
-            --notes "Release APK from commit $SHORT_SHA. Signed with release keystore." \
+            --notes "$(printf 'APK (direct install) + AAB (Play Store)\n\nCommit: %s\nBranch: main' $SHORT_SHA)" \
             --prerelease
 
           echo "Release created: $TAG"
